@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css" integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
+    <title>Dashboard</title>
+
+    <style>
+
+.myClass a {
+    background-color: #f8f9fa;
+    color: inherit;
+    
+}
+.myClass a:hover {
+    background-color: #f8f9fa;
+}
+
+/* Active tab */
+.myClass a:focus {
+    background-color: #343a40;
+    color: 'black';
+}
+.myClass a:active {
+    background-color: #f8f9fa;
+    color: 'black';
+}
+.nav-item.nav-link.active{  
+    background-color: #343a40;
+    color: white;
+}
+.scrollable_table{
+  max-height: 250px;
+    overflow: scroll;
+}
+.nav_menu_align{
+  line-height: 2.44em;
+}
+
+    </style>
+
+  </head>
+
+  <body class="bg-light">
+    <!-- Algo IPs -->
+
+    <div class="main_holder" id="main_holder">
+        <div class="navbar_holder" id="navbar_holder"></div>
+        <div class="content_holder" id="content_holder"></div>
+    </div>
+
+
+    <!-- Bootstrap -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/js/bootstrap.min.js" integrity="sha384-OgVRvuATP1z7JjHLkuOU7Xw704+h835Lr+6QL9UvYjZE3Ipu6Tp75j7Bh/kR0JKI" crossorigin="anonymous"></script>
+    
+    <!-- React.JS -->
+    <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+
+    <!-- React-BootStrap -->
+    <script src="https://unpkg.com/react-bootstrap@next/dist/react-bootstrap.min.js"crossorigin></script>
+    <script>
+            var Card = ReactBootstrap.Card;
+            var Button = ReactBootstrap.Button;
+            var Container = ReactBootstrap.Container;
+            var Row = ReactBootstrap.Row;
+            var Col = ReactBootstrap.Col;
+            var Alert = ReactBootstrap.Alert;
+            var CardDeck = ReactBootstrap.CardDeck;
+            var CardColumns = ReactBootstrap.CardColumns;
+            var Badge = ReactBootstrap.Badge;
+            var Table = ReactBootstrap.Table;
+            var Tabs = ReactBootstrap.Tabs;
+            var Tab = ReactBootstrap.Tab;
+            var InputGroup = ReactBootstrap.InputGroup;
+            var FormControl = ReactBootstrap.FormControl;
+            var Form = ReactBootstrap.Form;
+
+    </script>
+
+
+
+
+    <!-- My Scripts -->
+    <script type="text/javascript">
+    var source = JSON.parse('{{data|safe}}');
+    var data = source.data;
+    var web_app_ip = data.app_ip;
+    var algos_ip = data.algos_ip;
+
+    </script>
+
+    <script src="{{ url_for('static', filename='canvasjs.min.js') }}" type="text/javascript"></script>
+    <script src="{{ url_for('static', filename='canvasjs.react.js') }}" type="text/javascript"></script>
+    <script src="{{ url_for('static', filename='styledCharts.js') }}" type="text/javascript"></script>
+
+
+    <script src="{{ url_for('static', filename='ajax.js') }}" type="text/javascript"></script>
+    <script src="{{ url_for('static', filename='navbar.js') }}" type="text/javascript"></script>
+    <script src="{{ url_for('static', filename='content.js') }}" type="text/javascript"></script>
+
+  </body>
+</html>
