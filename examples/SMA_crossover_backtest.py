@@ -58,6 +58,5 @@ if __name__ == '__main__':
     algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='BACKTEST',
-                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_1M'])
-    # algo.run(5000)
+                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_1M'], spread=0)
     # algo.backtest('2020-04-01', '2020-05-01')
