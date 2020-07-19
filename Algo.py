@@ -78,9 +78,9 @@ class BaseAlgo(ABC):
                    hook_ip: str, hook_name: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
                    txn_cost: float = 30, max_cache: int = 50000, ticker_max_cache: int = 3000,
-                   cache_retain_ratio: float = 0.3):
+                   cache_retain_ratio: float = 0.3, test_mq_con=True, **kwargs):
         try:
-            assert trading_environment in ('REAL', 'SIMULATE', 'PAPER'), 'Invalid trading universe {}'.format(
+            assert trading_environment in ('REAL', 'SIMULATE', 'BACKTEST'), 'Invalid trading universe {}'.format(
                 trading_environment)
 
             for dtype in datatypes:
@@ -100,31 +100,32 @@ class BaseAlgo(ABC):
             self._current_margin = 0.0
             self._current_cash = initial_capital
 
-            # Test Connection with ZMQ
-            test_context = zmq.Context()
-            try:
-                test_socket = test_context.socket(zmq.PAIR)
-                test_socket.setsockopt(zmq.LINGER, 0)
-                test_socket.setsockopt(zmq.SNDTIMEO, 2000)
-                test_socket.setsockopt(zmq.RCVTIMEO, 2000)
+            if test_mq_con:
+                # Test Connection with ZMQ
+                test_context = zmq.Context()
+                try:
+                    test_socket = test_context.socket(zmq.PAIR)
+                    test_socket.setsockopt(zmq.LINGER, 0)
+                    test_socket.setsockopt(zmq.SNDTIMEO, 2000)
+                    test_socket.setsockopt(zmq.RCVTIMEO, 2000)
 
-                hello_mq_ip = self._mq_ip.split(':')
-                hello_mq_ip = ':'.join([hello_mq_ip[0], hello_mq_ip[1], str(int(hello_mq_ip[2]) + 1)])
-                test_socket.connect(hello_mq_ip)
-                test_socket.send_string('Ping')
-                msg = test_socket.recv_string()
-                if msg != 'Pong':
-                    raise Exception('no Pong!')
-                self.logger.info(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
-                self.logger.info(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
+                    hello_mq_ip = self._mq_ip.split(':')
+                    hello_mq_ip = ':'.join([hello_mq_ip[0], hello_mq_ip[1], str(int(hello_mq_ip[2]) + 1)])
+                    test_socket.connect(hello_mq_ip)
+                    test_socket.send_string('Ping')
+                    msg = test_socket.recv_string()
+                    if msg != 'Pong':
+                        raise Exception('no Pong!')
+                    self.logger.info(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
+                    self.logger.info(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
 
-            except zmq.error.Again:
-                raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}')
-            # except Exception as e:
-            #     raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}, reason: {str(e)}')
+                except zmq.error.Again:
+                    raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}')
+                # except Exception as e:
+                #     raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}, reason: {str(e)}')
 
-            finally:
-                test_context.destroy()
+                finally:
+                    test_context.destroy()
 
             # Test Connection with Hook
             try:
@@ -178,19 +179,17 @@ class BaseAlgo(ABC):
             self.logger.error(f'Failed to initialize algo, reason: {str(e)}')
             self._initialized = False
 
-    async def daily_record_stat(self):
-        def log():
-            EV = sum(self.positions['market_value'])
-            self._current_margin = sum(abs(self.positions['market_value']))
-            PV = EV + self._current_cash
-            self.record.loc[datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = [PV, EV, self._current_cash,
-                                                                                      self._current_margin]
-        log()
-
-        await asyncio.sleep(60*60*24 - time.time() % 60*60*24)
+    async def daily_record_performance(self):
         while True:
-            log()
-            await asyncio.sleep(60*60*24 - time.time() % 60*60*24)
+            self.log()
+            await asyncio.sleep(60 * 60 * 24 - time.time() % 60 * 60 * 24)
+
+    def log(self, date=None):
+        EV = sum(self.positions['market_value'])
+        self._current_margin = sum(abs(self.positions['market_value']))
+        PV = EV + self._current_cash
+        d = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') if date is None else date
+        self.record.loc[d] = [PV, EV, self._current_cash, self._current_margin]
 
     async def main(self):
 
@@ -273,7 +272,7 @@ class BaseAlgo(ABC):
     async def on_order_update(self, order_id, df):
         pass
 
-    def run(self, sanic_port, sanic_host='127.0.0.1', PV_log_frequency=60 * 60):
+    def run(self, sanic_port, sanic_host='127.0.0.1'):
 
         if not self._initialized:
             self.logger.info('Algo not initialized')
@@ -292,7 +291,7 @@ class BaseAlgo(ABC):
                 web_server = self._sanic.create_server(return_asyncio_server=True, host=sanic_host, port=sanic_port)
                 tasks.append(web_server)
                 tasks.append(self.main())
-                tasks.append(self.daily_record_stat())
+                tasks.append(self.daily_record_performance())
                 await asyncio.gather(*tasks)
 
             loop.create_task(_run())
@@ -322,7 +321,7 @@ class BaseAlgo(ABC):
 
         else:
             if order_id not in self.completed_orders['order_id'].values:
-                cash_change = - (dealt_qty * avg_price * trd_side)
+                cash_change = - dealt_qty * avg_price
                 qty_change = dealt_qty
             else:
                 cash_change = 0
@@ -461,17 +460,27 @@ class BaseAlgo(ABC):
 
         return df
 
-    def load_ticker_cache(self, ticker, datatype,
-                          start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')):
-        end_date = datetime.datetime.today().strftime('%Y-%m-%d')
+    def download_historical(self, ticker, datatype, start_date, end_date, from_exchange=False):
         params = {'ticker': ticker, 'datatype': datatype, 'start_date': start_date, 'end_date': end_date,
-                  'from_exchange': False}
+                  'from_exchange': from_exchange}
         result = requests.get(self._hook_ip + '/historicals', params=params).json()
         if result['ret_code'] == 1:
             df = pd.read_json(result['return']['content'])
+            return 1, df
+        else:
+            return 0, pd.DataFrame()
+
+    def load_ticker_cache(self, ticker, datatype,
+                          start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d'),
+                          from_exchange=False):
+        end_date = datetime.datetime.today().strftime('%Y-%m-%d')
+        ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
+                                                end_date=end_date, from_exchange=from_exchange)
+
+        if ret_code == 1:
             self.add_cache(datatype=datatype, df=df)
         else:
-            raise Exception('Failed to pre-load data from Hook')
+            raise Exception('Failed to download historical data from Hook')
 
     def load_all_cache(self, tickers=None,
                        start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')):
@@ -559,6 +568,7 @@ class BaseAlgo(ABC):
             return 0, f'Lot size is invalid, should be multiple of {self.ticker_lot_size[ticker]} but got {quantity}'
 
         return 1, 'Risk check passed'
+
     # ------------------------------------------------ [ Get infos ] ------------------------------------------
     def get_qty(self, ticker):
         return self.positions.loc[ticker]['quantity']
@@ -594,7 +604,8 @@ class BaseAlgo(ABC):
     async def get_attributes(self, request):
         return_attributes = dict()
         restricted_attr = (
-            '_trading_universe', 'bars_no', 'logger', '_trading_environment', '_failed_tickers', '_datatypes', '_txn_cost', '_total_txn_cost',
+            '_trading_universe', 'bars_no', 'logger', '_trading_environment', '_failed_tickers', '_datatypes',
+            '_txn_cost', '_total_txn_cost',
             '_initial_capital', '_margin', '_running', '_current_cash', '_current_margin', 'pending_orders',
             'completed_orders', 'positions', 'slippage', 'ticker_lot_size', 'record', '_ip', '_mq_ip', '_hook_ip',
             '_zmq_context', '_mq_socket', '_topics', '_hook_name', 'cache_path', 'cache', '_max_cache',
@@ -674,7 +685,8 @@ class BaseAlgo(ABC):
                 pending_orders = pending_orders.loc[pending_orders['updated_time'] >= start_date]
         else:
             pending_orders = pd.DataFrame()
-        return response.json({'ret_code': 1, 'return': {'content': {'pending_orders': pending_orders.to_dict('records')}}}, default=str)
+        return response.json(
+            {'ret_code': 1, 'return': {'content': {'pending_orders': pending_orders.to_dict('records')}}}, default=str)
 
     async def get_completed_orders(self, request):
         start_date = request.args.get('start_date')
@@ -712,7 +724,7 @@ class BaseAlgo(ABC):
         new_tickers = list(set(tickers).difference(self._trading_universe))
 
         self.subscribe_tickers(tickers=new_tickers)
-        return response.json({'s':'s'})
+        return response.json({'s': 's'})
         # TODO: return stuffs
 
     async def unsubscribe_ticker(self, request):
@@ -749,7 +761,7 @@ class BaseAlgo(ABC):
 
 
 class CandlestickStrategy(BaseAlgo):
-    def __init__(self, name: str, bars_no: int, benchmark: str='HSI'):
+    def __init__(self, name: str, bars_no: int, benchmark: str = 'HSI'):
         super().__init__(name=name, benchmark=benchmark)
         self.last_candlestick_time = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
         self.bars_no = bars_no
@@ -759,14 +771,139 @@ class CandlestickStrategy(BaseAlgo):
         if 'K_' in datatype:
             datetime = df['datetime'].iloc[-1]
             last_df = self.last_candlestick_time[ticker][datatype]
-            trigger_strat = False
-            if (last_df is not None) and (datetime != last_df['datetime'].iloc[-1]):
-                trigger_strat = True
+            trigger_strat = (last_df is not None) and (datetime != last_df['datetime'].iloc[-1])
             self.last_candlestick_time[ticker][datatype] = df
             return trigger_strat, (
                 datatype, ticker, self.get_data_rows(datatype=datatype, ticker=ticker, n_rows=self.bars_no + 1)[:-1])
         else:
             return True, (datatype, ticker, df)
+
+
+class Backtest(BaseAlgo):
+    def __init__(self, name: str, bars_no: int, benchmark: str = 'HSI'):
+        super().__init__(name=name, benchmark=benchmark)
+        self.bars_no = bars_no
+        self._spread = 0
+        self._order_queue = None
+        self._cur_candlestick_datetime = None
+
+    def determine_trigger(self, datatype, ticker, df):
+        if 'K_' in datatype:
+            return True, (
+                datatype, ticker, self.get_data_rows(datatype=datatype, ticker=ticker, n_rows=self.bars_no))
+        else:
+            return True, (datatype, ticker, df)
+
+    def initialize(self, initial_capital: float, margin: float, mq_ip: str,
+                   hook_ip: str, hook_name: str, trading_environment: str,
+                   trading_universe: list, datatypes: list,
+                   txn_cost: float = 30, max_cache: int = 50000, ticker_max_cache: int = 3000,
+                   cache_retain_ratio: float = 0.3, test_mq_con=False, spread: float = 0.2 / 100):
+        # self.__init__(name=self.name, bars_no=self.bars_no, benchmark=self.benchmark)
+        super().initialize(initial_capital=initial_capital, margin=margin, mq_ip=mq_ip, hook_ip=hook_ip,
+                           hook_name=hook_name, trading_environment=trading_environment,
+                           trading_universe=trading_universe,
+                           txn_cost=txn_cost, max_cache=max_cache, ticker_max_cache=ticker_max_cache,
+                           cache_retain_ratio=cache_retain_ratio, test_mq_con=test_mq_con, spread=spread,
+                           datatypes=datatypes)
+        self._spread = spread
+        self._order_queue = list()
+
+    def backtest(self, start_date, end_date):
+        if not self._initialized:
+            self.logger.info('Algo not initialized')
+            return
+        elif self._trading_environment != 'BACKTEST':
+            self.logger.info('Environment is not BACKTEST')
+            return
+
+        self._running = True
+        self.logger.info(f'Backtesting Starts...')
+
+        # No need to load ticker cache
+        succeed, failed = self.load_ticker_lot_size(tickers=self._trading_universe)
+        for ticker in succeed:
+            self.positions.loc[ticker] = [0.0, 0.0, 0.0]
+
+        self.logger.info(f'Loading Date from MySQL DB...')
+        backtest_df = pd.DataFrame()
+        for ticker in self._trading_universe:
+            for datatype in self._datatypes:
+                ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
+                                                        end_date=end_date)
+                # TODO: different bars_no for different datatype
+                filler = df.iloc[:self.bars_no]
+                self.add_cache(datatype=datatype, df=filler)
+                df = df.iloc[self.bars_no:]
+                if ret_code != 1 or df.shape[0] == 0:
+                    self.logger.error(
+                        f'Failed to download data {datatype} {ticker} from Hook, please ensure data is in MySQL Db')
+                else:
+                    df['datatype'] = datatype
+                    backtest_df = backtest_df.append(df)
+
+        backtest_df = backtest_df.sort_values(by=['datetime', 'datatype', 'ticker'], ascending=True)
+
+        self.logger.info(f'Loaded Data, backtesting starts...')
+
+        async def _backtest():
+            self._order_queue = list()
+            # For progress bar
+            last_percent = 0
+
+            for i in range(backtest_df.shape[0]):
+                # trigger orderUpdate first
+                if len(self._order_queue) != 0:
+                    for order_no in range(len(self._order_queue)):
+                        order_update_df = self._order_queue.pop()
+                        self.update_positions(df=order_update_df)
+                        await self.on_order_update(order_id=order_update_df['order_id'].iloc[-1], df=order_update_df)
+
+
+                # Progress Bar
+                cur_percent = int(i / backtest_df.shape[0] * 100)
+                if cur_percent != last_percent:
+                    print(f'Progress: |{cur_percent * "#"}{(100 - cur_percent) * " "}| {i}/{backtest_df.shape[0]}')
+                    last_percent = cur_percent
+
+                # log performance
+                tmp_df = backtest_df.iloc[i:i + 1]
+                cur_candlestick_datetime = tmp_df['datetime'].iloc[-1]
+                self._cur_candlestick_datetime = cur_candlestick_datetime
+                if i > 0:
+                    last_date = backtest_df.iloc[i - 1:i]['datetime'].iloc[-1].date()
+                    if cur_candlestick_datetime.date() != last_date:
+                        self.log(date=last_date)
+                datatype = tmp_df['datatype'].iloc[-1]
+                ticker = tmp_df['ticker'].iloc[-1]
+
+                self.update_prices(datatype=datatype, df=tmp_df)
+                self.add_cache(datatype=datatype, df=tmp_df)
+                trigger_strat, (tgr_dtype, tgr_ticker, tgr_df) = self.determine_trigger(datatype=datatype,
+                                                                                        ticker=ticker, df=tmp_df)
+                if trigger_strat:
+                    await self.trigger_strat(datatype=tgr_dtype, ticker=tgr_ticker, df=tgr_df)
+
+            self.logger.info('Backtesting Completed! Call report() method to see backtesting result!')
+
+        asyncio.run(_backtest())
+
+    def trade(self, ticker, trade_side, order_type, quantity, price):
+        risk_passed, msg = self.risk_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
+        if not risk_passed:
+            return 0, f'Risk check failed: {msg}'
+
+        spread_ajust_sign = 1 if 'BUY' in trade_side else -1
+        spread_adjusted_price = price * (1 + (spread_ajust_sign * self._spread))
+
+        backtest_trade = {'order_id': hash(time.time()), 'ticker': ticker, 'price': price,
+                          'trd_side': trade_side, 'order_status': 'FILLED_ALL',
+                          'dealt_avg_price': spread_adjusted_price,
+                          'dealt_qty': quantity}
+        order_update_df = pd.DataFrame(backtest_trade, index=[0])
+        order_update_df['created_time'] = self._cur_candlestick_datetime
+        self._order_queue.append(order_update_df)
+        return 1, pd.DataFrame(backtest_trade, index=[0])
 
 
 if __name__ == '__main__':

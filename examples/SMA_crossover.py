@@ -5,7 +5,7 @@ import talib
 
 class SMACrossover(CandlestickStrategy):
     def __init__(self, short, long):
-        super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long + 1)
+        super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long+1)
         self.short = short
         self.long = long
         self._test_df = None
@@ -21,18 +21,18 @@ class SMACrossover(CandlestickStrategy):
             sma_long_last = df['SMA_long'].iloc[-2]
             sma_long_cur = df['SMA_long'].iloc[-1]
 
-            print('Datetime: {} , Last: {}/{}, Current: {}/{}'.format(df['datetime'].iloc[-1], sma_short_last,
-                                                                      sma_long_last, sma_short_cur, sma_long_cur))
+            print(f'Datetime: {df["datetime"].iloc[-1]} , Last: {sma_short_last}/{sma_long_last}, Current: {sma_short_cur}/{sma_long_cur}')
             print('\n')
+
             self._test_df = df
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
                 print(self.buy_limit(ticker=ticker,  quantity=self.get_lot_size(ticker),
-                                     price=self.get_price(ticker=ticker)))
+                                     price=self.get_price(ticker=ticker)+1))
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
                 print(self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                                      price=self.get_price(ticker=ticker)))
+                                      price=self.get_price(ticker=ticker)-1))
         else:
             pass
 
@@ -54,7 +54,7 @@ class SMACrossover(CandlestickStrategy):
 
 
 if __name__ == '__main__':
-    algo = SMACrossover(short=20,long=40)
+    algo = SMACrossover(short=20, long=40)
     algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='SIMULATE',
