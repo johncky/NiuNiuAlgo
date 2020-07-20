@@ -309,6 +309,7 @@ class BaseAlgo(ABC):
         order_status = df['order_status'].iloc[0]
 
         in_pending = False
+        ###################################################### directly goes to completed, txn_cost not recorded
         if order_id in self.pending_orders.keys():
             in_pending = True
             last_order_update_df = self.pending_orders[order_id]
@@ -321,6 +322,7 @@ class BaseAlgo(ABC):
 
         else:
             if order_id not in self.completed_orders['order_id'].values:
+                not_registered = True
                 cash_change = - dealt_qty * avg_price
                 qty_change = dealt_qty
             else:
@@ -850,7 +852,7 @@ class Backtest(BaseAlgo):
             self._order_queue = list()
             # For progress bar
             last_percent = 0
-
+            self.log(backtest_df.iloc[0]['datetime'].date())
             for i in range(backtest_df.shape[0]):
                 # trigger orderUpdate first
                 if len(self._order_queue) != 0:
