@@ -155,7 +155,7 @@ class SMACrossover(CandlestickStrategy):
 ```
 
 <h3> Backtesting </h3>
-Currently on candlesticks strategies supports backtesting.(FutuNiuNiu only supports historical data of candlsticks data)
+Currently only candlesticks strategies supports backtesting.(FutuNiuNiu only supports historical data of candlsticks data)
 To backtest a strategies, inhertie from Backtest class, and run algo.backtest().
 Please Note that you must fill your MySQL database with historical data first. You can do so through FutuHook API /db/fill.
 
