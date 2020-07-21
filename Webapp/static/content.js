@@ -836,25 +836,6 @@ function StatsCard(props) {
                         null,
                         round_pct(props.algos_data.cash / props.algos_data.pv * 100, 2) + '%'
                     )
-                ),
-                React.createElement(
-                    'tr',
-                    null,
-                    React.createElement(
-                        'td',
-                        null,
-                        'Margin: '
-                    ),
-                    React.createElement(
-                        'td',
-                        null,
-                        '$' + props.algos_data.margin
-                    ),
-                    React.createElement(
-                        'td',
-                        null,
-                        round_pct(props.algos_data.margin / props.algos_data.pv * 100, 2) + '%'
-                    )
                 )
             )
         ),
@@ -986,11 +967,6 @@ function ChartCard(props) {
                 Tab,
                 { eventKey: 'Cash', title: 'Cash' },
                 React.createElement(SplineAreaChart, { title: 'Cash', data: props.algos_data.Cash })
-            ),
-            React.createElement(
-                Tab,
-                { eventKey: 'Margin', title: 'Margin' },
-                React.createElement(SplineAreaChart, { title: 'Margin', data: props.algos_data.Margin })
             )
         )
     );

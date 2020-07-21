@@ -462,12 +462,6 @@ function StatsCard(props){
                 <td>{round_pct((props.algos_data.cash / props.algos_data.pv * 100),2) + '%'}</td>
                 </tr>
 
-                <tr>
-                <td>Margin: </td>
-                <td>{'$'+props.algos_data.margin}</td>
-                <td>{round_pct((props.algos_data.margin / props.algos_data.pv * 100),2) + '%'}</td>
-                </tr>
-
 
             </tbody>
             </Table>
@@ -529,9 +523,6 @@ function ChartCard(props){
                     <SplineAreaChart title="Cash" data={props.algos_data.Cash}/>
                 </Tab>
 
-                <Tab eventKey="Margin" title="Margin">
-                    <SplineAreaChart title="Margin" data={props.algos_data.Margin}/>
-                </Tab>
             </Tabs>
         </div>
     );

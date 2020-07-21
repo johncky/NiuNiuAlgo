@@ -401,10 +401,6 @@ class WebApp:
         cash_df.columns = ['x', 'y']
         cash_df = cash_df.drop_duplicates('x', keep='last')
 
-        margin_df = pd.DataFrame(pd.concat(curves['Margin'], axis=1).fillna(method='bfill').fillna(method='ffill').sum(axis=1),
-                                 columns=['y']).reset_index()
-        margin_df.columns = ['x', 'y']
-        margin_df = margin_df.drop_duplicates('x', keep='last')
 
         # Returns of combined
         (d_return, d_pct), (m_return, m_pct), (bmk_return, bmk_pct), (bmk_m_return, bmk_m_pct), \
@@ -427,7 +423,6 @@ class WebApp:
         data['benchmark_sharpe'] = benchmark_sharpe
         data['pv'] = pv_df['y'].iloc[-1]
         data['cash'] = cash_df['y'].iloc[-1]
-        data['margin'] = margin_df['y'].iloc[-1]
 
         data['initialized_date'] = 'None'
         data['days_since_deployment'] = 'None'
@@ -436,7 +431,6 @@ class WebApp:
         data['EV'] = ev_df.astype('str').to_dict('records')
         data['PV'] = pv_df.astype('str').to_dict('records')
         data['Cash'] = cash_df.astype('str').to_dict('records')
-        data['Margin'] = margin_df.astype('str').to_dict('records')
         data['settings'] = []
 
         # Orders & Positions of combined

@@ -14,8 +14,8 @@ class SMACrossover(Backtest):
 
     async def on_bar(self, datatype, ticker, df):
         if datatype == 'K_DAY':
-            df['SMA_short'] = talib.RSI(df['close'], timeperiod=self.short)
-            df['SMA_long'] = talib.RSI(df['close'], timeperiod=self.long)
+            df['SMA_short'] = talib.SMA(df['close'], timeperiod=self.short)
+            df['SMA_long'] = talib.SMA(df['close'], timeperiod=self.long)
             df = df.round({'SMA_short': 2, 'SMA_long': 2})
             sma_short_last = df['SMA_short'].iloc[-2]
             sma_short_cur = df['SMA_short'].iloc[-1]
@@ -25,18 +25,12 @@ class SMACrossover(Backtest):
 
             self._test_df = df
 
-
-
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-                self.buy_limit(ticker=ticker,  quantity=self.get_lot_size(ticker),
+                self.buy_limit(ticker=ticker,  quantity=self.cal_max_long_qty(ticker),
                                      price=self.get_price(ticker=ticker))
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-                print(
-                    f'Datetime: {df["datetime"].iloc[-1]} , Last: {sma_short_last}/{sma_long_last}, Current: {sma_short_cur}/{sma_long_cur}')
-                print('\n')
-                df.to_csv('test2.csv')
-                self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
+                self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
                                       price=self.get_price(ticker=ticker))
         else:
             pass
@@ -59,8 +53,8 @@ class SMACrossover(Backtest):
 
 if __name__ == '__main__':
     algo = SMACrossover(short=16,long=32)
-    algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
+    algo.initialize(initial_capital=200000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='BACKTEST',
-                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
+                    trading_universe=['HK.00700'], datatypes=['K_DAY'], spread=0)
     # algo.backtest('2020-04-01', '2020-05-01')

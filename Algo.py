@@ -33,12 +33,10 @@ class BaseAlgo(ABC):
         self._txn_cost = None
         self._total_txn_cost = 0
         self._initial_capital = 0.0
-        self._margin = 0.0
 
         # current status
         self._running = False
         self._current_cash = 0.0
-        self._current_margin = 0.0
 
         # Info
         self.pending_orders = dict()
@@ -47,7 +45,7 @@ class BaseAlgo(ABC):
         self.slippage = pd.DataFrame(columns=['exp_price', 'dealt_price', 'dealt_qty', 'total_slippage'])
         self.ticker_lot_size = None
 
-        self.record = pd.DataFrame(columns=['PV', 'EV', 'Cash', 'Margin'])
+        self.record = pd.DataFrame(columns=['PV', 'EV', 'Cash'])
 
         # IPs
         self._ip = ''
@@ -74,7 +72,7 @@ class BaseAlgo(ABC):
         self._sanic_port = None
         self._initialized = False
 
-    def initialize(self, initial_capital: float, margin: float, mq_ip: str,
+    def initialize(self, initial_capital: float, mq_ip: str,
                    hook_ip: str, hook_name: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
                    txn_cost: float = 30, max_cache: int = 50000, ticker_max_cache: int = 3000,
@@ -86,18 +84,15 @@ class BaseAlgo(ABC):
             for dtype in datatypes:
                 assert dtype in d_types, 'Invalid data type {}'.format(dtype)
 
-            assert margin >= initial_capital, 'Margin must be >= intial capital'
 
             self._trading_environment = trading_environment
             self._trading_universe = trading_universe
             self._datatypes = datatypes
             self._txn_cost = txn_cost
             self._initial_capital = initial_capital
-            self._margin = margin
             self._mq_ip = mq_ip
             self._hook_ip = hook_ip
             self._hook_name = hook_name
-            self._current_margin = 0.0
             self._current_cash = initial_capital
 
             if test_mq_con:
@@ -161,12 +156,10 @@ class BaseAlgo(ABC):
             self._datatypes = None
             self._txn_cost = None
             self._initial_capital = 0.0
-            self._margin = 0.0
             self._total_txn_cost = 0
 
             self._running = False
             self._current_cash = 0.0
-            self._current_margin = 0.0
 
             self._mq_ip = ''
             self._hook_ip = ''
@@ -186,10 +179,9 @@ class BaseAlgo(ABC):
 
     def log(self, date=None):
         EV = sum(self.positions['market_value'])
-        self._current_margin = sum(abs(self.positions['market_value']))
         PV = EV + self._current_cash
         d = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') if date is None else date
-        self.record.loc[d] = [PV, EV, self._current_cash, self._current_margin]
+        self.record.loc[d] = [PV, EV, self._current_cash]
 
     async def main(self):
 
@@ -555,16 +547,9 @@ class BaseAlgo(ABC):
         trade_sign = -1 if trade_side in ('BUY', 'BUY_BACK') else 1
         price = self.positions.loc[ticker]['price'] if price == 0.0 else price
         exp_cash_change = price * quantity * trade_sign
-        self._current_margin = sum(abs(self.positions['market_value']))
 
         if self._current_cash + exp_cash_change < 0:
             return 0, f'Not enough cash, current cash:{self._current_cash} , required cash:{-exp_cash_change}'
-
-        original_margin = abs(self.positions.loc[ticker]['market_value'])
-        new_margin = abs(price * (self.positions.loc[ticker]['quantity'] + -1 * trade_sign * quantity))
-        post_trade_margin = self._current_margin + new_margin - original_margin
-        if post_trade_margin > self._margin:
-            return 0, f'Not enough margin, current max margin:{self._margin} , required margin:{post_trade_margin}'
 
         if quantity % self.ticker_lot_size[ticker] != 0:
             return 0, f'Lot size is invalid, should be multiple of {self.ticker_lot_size[ticker]} but got {quantity}'
@@ -584,22 +569,20 @@ class BaseAlgo(ABC):
     def get_lot_size(self, ticker):
         return self.ticker_lot_size[ticker]
 
+    def cal_max_long_qty(self, ticker):
+        lot_size = self.get_lot_size(ticker)
+        one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker)
+        max_qty_by_cash = (self._current_cash - self._current_cash % one_hand_size) / one_hand_size * lot_size
+        return max_qty_by_cash
+
     @property
     def cash(self):
         return self._current_cash
 
     @property
-    def margin(self):
-        return self._current_margin
-
-    @property
     def available_cash(self):
         return self._current_cash
 
-    @property
-    def available_margin(self):
-        self._current_margin = sum(abs(self.positions['market_value']))
-        return self._margin - self._current_margin
 
     # ------------------------------------------------ [ Webapp ] ------------------------------------------
 
@@ -608,7 +591,7 @@ class BaseAlgo(ABC):
         restricted_attr = (
             '_trading_universe', 'bars_no', 'logger', '_trading_environment', '_failed_tickers', '_datatypes',
             '_txn_cost', '_total_txn_cost',
-            '_initial_capital', '_margin', '_running', '_current_cash', '_current_margin', 'pending_orders',
+            '_initial_capital', '_running', '_current_cash', 'pending_orders',
             'completed_orders', 'positions', 'slippage', 'ticker_lot_size', 'record', '_ip', '_mq_ip', '_hook_ip',
             '_zmq_context', '_mq_socket', '_topics', '_hook_name', 'cache_path', 'cache', '_max_cache',
             '_ticker_max_cache',
@@ -623,7 +606,6 @@ class BaseAlgo(ABC):
         portfolio_value = sum(self.positions['market_value']) + self._current_cash
         trades = self.completed_orders.shape[0]
         days_since_deployment = max(int((datetime.datetime.today() - self.initialized_date).days), 1)
-        self._current_margin = sum(abs(self.positions['market_value']))
 
         return response.json({'ret_code': 1, 'return': {'content': {'name': self.name,
                                                                     'benchmark': self.benchmark,
@@ -632,7 +614,6 @@ class BaseAlgo(ABC):
                                                                     'ip': self._ip,
                                                                     'pv': portfolio_value,
                                                                     'cash': self._current_cash,
-                                                                    'margin': self._current_margin,
                                                                     'n_trades': trades,
                                                                     'txn_cost_total': self._total_txn_cost,
                                                                     'initialized_date': self.initialized_date.strftime(
@@ -662,14 +643,9 @@ class BaseAlgo(ABC):
         cash.columns = ['x', 'y']
         cash = cash.to_dict('records')
 
-        margin = record['Margin'].reset_index()
-        margin.columns = ['x', 'y']
-        margin = margin.to_dict('records')
-
         return response.json({'ret_code': 1, 'return': {'content': {'PV': pv,
                                                                     'EV': ev,
-                                                                    'Cash': cash,
-                                                                    'Margin': margin}}})
+                                                                    'Cash': cash}}})
 
     async def get_positions(self, request):
         positions = self.positions.reset_index()
@@ -796,13 +772,13 @@ class Backtest(BaseAlgo):
         else:
             return True, (datatype, ticker, df)
 
-    def initialize(self, initial_capital: float, margin: float, mq_ip: str,
+    def initialize(self, initial_capital: float, mq_ip: str,
                    hook_ip: str, hook_name: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
                    txn_cost: float = 30, max_cache: int = 50000, ticker_max_cache: int = 3000,
                    cache_retain_ratio: float = 0.3, test_mq_con=False, spread: float = 0.2 / 100):
         # self.__init__(name=self.name, bars_no=self.bars_no, benchmark=self.benchmark)
-        super().initialize(initial_capital=initial_capital, margin=margin, mq_ip=mq_ip, hook_ip=hook_ip,
+        super().initialize(initial_capital=initial_capital, mq_ip=mq_ip, hook_ip=hook_ip,
                            hook_name=hook_name, trading_environment=trading_environment,
                            trading_universe=trading_universe,
                            txn_cost=txn_cost, max_cache=max_cache, ticker_max_cache=ticker_max_cache,
@@ -837,13 +813,17 @@ class Backtest(BaseAlgo):
                 filler = df.iloc[:self.bars_no]
                 self.add_cache(datatype=datatype, df=filler)
                 df = df.iloc[self.bars_no:]
+                if df.shape[0] > 0:
+                    self.logger.info(f'Consumed {filler.shape[0]} bars to initialize, start the backtesting from {df["datetime"].iloc[0]}')
+                else:
+                    raise Exception(f'Not Enough bars to backtest, took {filler.shape[0]} bars to intialize')
+
                 if ret_code != 1 or df.shape[0] == 0:
                     self.logger.error(
                         f'Failed to download data {datatype} {ticker} from Hook, please ensure data is in MySQL Db')
                 else:
                     df['datatype'] = datatype
                     backtest_df = backtest_df.append(df)
-
         backtest_df = backtest_df.sort_values(by=['datetime', 'datatype', 'ticker'], ascending=True)
 
         self.logger.info(f'Loaded Data, backtesting starts...')
