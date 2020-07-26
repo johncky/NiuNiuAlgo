@@ -28,7 +28,6 @@ class SMACrossover(Backtest):
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
                 self.buy_limit(ticker=ticker, quantity=self.cal_max_buy_qty(ticker),
                                price=self.get_price(ticker=ticker))
-
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
                 self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
                                       price=self.get_price(ticker=ticker))

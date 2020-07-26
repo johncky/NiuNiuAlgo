@@ -27,12 +27,12 @@ class SMACrossover(CandlestickStrategy):
             self._test_df = df
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-                print(self.buy_limit(ticker=ticker,  quantity=self.get_lot_size(ticker),
-                                     price=self.get_price(ticker=ticker)+1))
+                self.buy_limit(ticker=ticker, quantity=self.cal_max_buy_qty(ticker),
+                               price=self.get_price(ticker=ticker))
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-                print(self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                                      price=self.get_price(ticker=ticker)-1))
+                self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
+                                      price=self.get_price(ticker=ticker))
         else:
             pass
 

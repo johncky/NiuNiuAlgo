@@ -553,6 +553,9 @@ class BaseAlgo(ABC):
         price = self.positions.loc[ticker]['price'] if price == 0.0 else price
         exp_cash_change = price * quantity * trade_sign
 
+        if quantity <= 0:
+            return 0, f'Quantity cannot be >= 0! '
+
         if self._current_cash + exp_cash_change < 0:
             return 0, f'Not enough cash, current cash:{self._current_cash} , required cash:{-exp_cash_change}'
 
@@ -876,14 +879,14 @@ class Backtest(BaseAlgo):
         asyncio.run(_backtest())
 
     def trade(self, ticker, trade_side, order_type, quantity, price):
+        import random
         risk_passed, msg = self.risk_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
         if not risk_passed:
             return 0, f'Risk check failed: {msg}'
-
         spread_ajust_sign = 1 if 'BUY' in trade_side else -1
         spread_adjusted_price = price * (1 + (spread_ajust_sign * self._spread))
 
-        backtest_trade = {'order_id': hash(time.time()), 'ticker': ticker, 'price': price,
+        backtest_trade = {'order_id': hash(random.random()), 'ticker': ticker, 'price': price,
                           'trd_side': trade_side, 'order_status': 'FILLED_ALL',
                           'dealt_avg_price': spread_adjusted_price,
                           'dealt_qty': quantity}
@@ -904,20 +907,23 @@ class Backtest(BaseAlgo):
         ticker_df['sell_pt'] = [1 if 'SELL' in str(x) else None for x in ticker_df['trd_side']]
         ticker_df['buy_y'] = ticker_df['buy_pt'] * ticker_df['close']
         ticker_df['sell_y'] = ticker_df['sell_pt'] * ticker_df['close']
-        ticker_df['x'] = range(ticker_df.shape[0])
+        ticker_df['x'] = ticker_df['datetime']
         from matplotlib import pyplot as plt
-        plt.scatter(x=ticker_df['x'], y=ticker_df['buy_y'], marker='o', color='green', s=100)
-        plt.scatter(x=ticker_df['x'], y=ticker_df['sell_y'], marker='o', color='red', s=100)
-        plt.plot(ticker_df['close'])
+        plt.scatter(x=ticker_df['x'], y=ticker_df['buy_y'].values, marker='o', color='green', s=100)
+        plt.scatter(x=ticker_df['x'], y=ticker_df['sell_y'].values, marker='o', color='red', s=100)
+        plt.ylabel(f'{ticker} price')
+        plt.plot(ticker_df['x'], ticker_df['close'])
+        plt.title(f'{ticker} entry-exit points')
 
     def report(self, benchmark):
         import quantstats as qs
         import webbrowser
 
-        PV = self.records.PV
+        PV = self.records['PV']
         PV.index = pd.to_datetime(PV.index)
+        PV.index.name = 'Date'
         html = f'{self.name}.html'
-        qs.reports.html(PV, benchmark, output=html, title=f'{self.name} vs {benchmark} report')
+        qs.reports.html(PV, benchmark, output=html, title=f'{self.name} vs {benchmark}')
         webbrowser.open(html)
 
 

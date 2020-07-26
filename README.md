@@ -3,7 +3,7 @@
 <hr/>
 There are 3 things: FutuHook, Dashboard app, Algo class
 <br/>
-<img src="https://github.com/johncky/FutuHook/blob/master/docs/System.png">
+<img src="https://github.com/johncky/FutuAlgo/blob/master/docs/System.png">
 
  
  
@@ -115,12 +115,12 @@ class SMACrossover(CandlestickStrategy):
             self._test_df = df
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-                print(self.buy_limit(ticker=ticker,  quantity=self.get_lot_size(ticker),
-                                     price=self.get_price(ticker=ticker)))
+                self.buy_limit(ticker=ticker, quantity=self.cal_max_buy_qty(ticker),
+                               price=self.get_price(ticker=ticker))
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-                print(self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                                      price=self.get_price(ticker=ticker)))
+                self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
+                                      price=self.get_price(ticker=ticker))
         else:
             pass
 
@@ -155,9 +155,10 @@ class SMACrossover(CandlestickStrategy):
 ```
 
 <h3> Backtesting </h3>
-Currently only candlesticks strategies supports backtesting.(FutuNiuNiu only supports historical data of candlsticks data)
+<p>Currently only candlesticks strategies supports backtesting.(FutuNiuNiu only supports historical data of candlsticks data)
 To backtest a strategies, inhertie from Backtest class, and run algo.backtest().
 Please Note that you must fill your MySQL database with historical data first. You can do so through FutuHook API /db/fill.
+</p>
 
 ```python
 class SMACrossover(Backtest):
@@ -179,11 +180,11 @@ class SMACrossover(Backtest):
 
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-                self.buy_limit(ticker=ticker,  quantity=self.get_lot_size(ticker),
-                                     price=self.get_price(ticker=ticker))
+                self.buy_limit(ticker=ticker, quantity=self.cal_max_buy_qty(ticker),
+                               price=self.get_price(ticker=ticker))
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-                self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
+                self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
                                       price=self.get_price(ticker=ticker))
         else:
             pass
@@ -212,6 +213,38 @@ if __name__ == '__main__':
                     trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
     algo.backtest(start_date = '2020-04-01', end_date = '2020-05-01')
 ```
+
+<h3> Backtesting report </h3>
+Powered by <a href="https://github.com/ranaroussi/quantstats">Quantstats by Ran Aroussi</a>. 
+<br>To see how report looks like, please go to <a href="https://github.com/ranaroussi/quantstats">Quantstats by Ran Aroussi</a>.
+</br>
+
+```python
+    algo = SMACrossover(short=16,long=32)
+    algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
+                    hook_ip='http://127.0.0.1:8000',
+                    hook_name='FUTU', trading_environment='BACKTEST',
+                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
+    algo.backtest(start_date = '2020-04-01', end_date = '2020-05-01')
+    # Use tencent 0700 as benchmark! This will open a brower showing the full report.
+    algo.report(benchmark='0700.HK')
+```
+
+<h4>Plot entry and exit points</h4>
+
+```python
+    algo = SMACrossover(short=16,long=32)
+    algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
+                    hook_ip='http://127.0.0.1:8000',
+                    hook_name='FUTU', trading_environment='BACKTEST',
+                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
+    algo.backtest(start_date = '2020-04-01', end_date = '2020-05-01')
+    # Use tencent 0700 as benchmark! This will open a brower showing the full report.
+    algo.plot_ticker_trades('K_DAY', 'HK.00700')
+```
+
+<img src="https://github.com/johncky/FutuAlgo/blob/master/docs/exit_entry_plot.png">
+
 
 <h3>Some API </h3>
 <p>Inside the Algo.py</p>
