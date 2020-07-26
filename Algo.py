@@ -290,7 +290,7 @@ class BaseAlgo(ABC):
 
     # ------------------------------------------------ [ Position ] ------------------------------------------
     def update_positions(self, df):
-
+        # TODO: changed 2020/07/26
         # record order df
         trd_side = 1 if df['trd_side'].iloc[0].upper() in ('BUY', 'BUY_BACK') else -1
         dealt_qty = df['dealt_qty'].iloc[0] * trd_side
@@ -364,6 +364,7 @@ class BaseAlgo(ABC):
 
     # ------------------------------------------------ [ Data ] ------------------------------------------
     def add_cache(self, datatype, df):
+        # TODO: changed 2020/07/26
         self.cache[datatype] = self.cache[datatype].append(df).drop_duplicates(
             subset=['datetime', 'ticker'], keep='last')
 
@@ -820,22 +821,24 @@ class Backtest(BaseAlgo):
             for datatype in self._datatypes:
                 ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
                                                         end_date=end_date)
+                if ret_code != 1 or df.shape[0] == 0:
+                    msg = f'Failed to download data {datatype} {ticker} from Hook, please ensure data is in MySQL Db'
+                    self.logger.error(msg)
+                    raise Exception(msg)
+                else:
+                    df['datatype'] = datatype
+
                 # TODO: different bars_no for different datatype
                 filler = df.iloc[:self.bars_no]
                 self.add_cache(datatype=datatype, df=filler)
                 df = df.iloc[self.bars_no:]
                 if df.shape[0] > 0:
+                    backtest_df = backtest_df.append(df)
                     self.logger.info(
                         f'Consumed {filler.shape[0]} bars to initialize, start the backtesting from {df["datetime"].iloc[0]}')
                 else:
                     raise Exception(f'Not Enough bars to backtest, took {filler.shape[0]} bars to intialize')
 
-                if ret_code != 1 or df.shape[0] == 0:
-                    self.logger.error(
-                        f'Failed to download data {datatype} {ticker} from Hook, please ensure data is in MySQL Db')
-                else:
-                    df['datatype'] = datatype
-                    backtest_df = backtest_df.append(df)
         backtest_df = backtest_df.sort_values(by=['datetime', 'datatype', 'ticker'], ascending=True)
 
         self.logger.info(f'Loaded Data, backtesting starts...')
