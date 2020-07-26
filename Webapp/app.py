@@ -368,8 +368,6 @@ class WebApp:
             curves['PV'].append(self.algo_curves[algo_name]['PV'].set_index('x').rename(columns={'y': algo_name}))
             curves['EV'].append(self.algo_curves[algo_name]['EV'].set_index('x').rename(columns={'y': algo_name}))
             curves['Cash'].append(self.algo_curves[algo_name]['Cash'].set_index('x').rename(columns={'y': algo_name}))
-            curves['Margin'].append(
-                self.algo_curves[algo_name]['Margin'].set_index('x').rename(columns={'y': algo_name}))
 
             # Values
             algo_summary = self.algo_data[algo_name]['summary'].to_dict('records')[0]
@@ -473,7 +471,6 @@ class WebApp:
                 algo_data['EV'] = self.algo_curves[algo_name]['EV'].astype('str').to_dict('records')
                 algo_data['PV'] = self.algo_curves[algo_name]['PV'].astype('str').to_dict('records')
                 algo_data['Cash'] = self.algo_curves[algo_name]['Cash'].astype('str').to_dict('records')
-                algo_data['Margin'] = self.algo_curves[algo_name]['Margin'].astype('str').to_dict('records')
                 algo_data['settings'] = self.algo_data[algo_name]['settings']
                 algo_data['positions'] = self.algo_data[algo_name]['positions'].to_dict('records')
                 algo_data['pending'] = self.algo_data[algo_name]['pending'].to_dict('records')

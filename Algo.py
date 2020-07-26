@@ -39,13 +39,12 @@ class BaseAlgo(ABC):
         self._current_cash = 0.0
 
         # Info
-        self.pending_orders = dict()
-        self.completed_orders = pd.DataFrame(columns=['order_id'])
-        self.positions = pd.DataFrame(columns=['price', 'quantity', 'market_value'])
-        self.slippage = pd.DataFrame(columns=['exp_price', 'dealt_price', 'dealt_qty', 'total_slippage'])
+        self.pending_orders = None
+        self.completed_orders = None
+        self.positions = None
+        self.slippage = None
         self.ticker_lot_size = None
-
-        self.records = pd.DataFrame(columns=['PV', 'EV', 'Cash'])
+        self.records = None
 
         # IPs
         self._ip = ''
@@ -62,14 +61,14 @@ class BaseAlgo(ABC):
         self._max_cache = 0
         self._per_ticker_max_cache = 0
         self._drop_cache_ratio = 0
-        self.cache_pickle_no_map = collections.defaultdict(lambda: 1)
+        self.cache_pickle_no_map = None
 
         # Web
         self._sanic = None
         self._sanic_host = None
         self._sanic_port = None
 
-        self.initialized_date = datetime.datetime.today()
+        self.initialized_date = None
         self._initialized = False
 
     def initialize(self, initial_capital: float, mq_ip: str,
@@ -85,8 +84,17 @@ class BaseAlgo(ABC):
 
             self._trading_environment = trading_environment
             self._trading_universe = trading_universe
+
             self._datatypes = datatypes
             self._txn_cost = txn_cost
+            self._total_txn_cost = 0
+
+            self.pending_orders = dict()
+            self.records = pd.DataFrame(columns=['PV', 'EV', 'Cash'])
+            self.completed_orders = pd.DataFrame(columns=['order_id'])
+            self.positions = pd.DataFrame(columns=['price', 'quantity', 'market_value'])
+            self.slippage = pd.DataFrame(columns=['exp_price', 'dealt_price', 'dealt_qty', 'total_slippage'])
+
             self._initial_capital = initial_capital
             self._mq_ip = mq_ip
             self._hook_ip = hook_ip
@@ -145,30 +153,15 @@ class BaseAlgo(ABC):
             self._drop_cache_ratio = drop_cache_ratio
             self.cache_pickle_no_map = collections.defaultdict(lambda: 1)
 
+            self.initialized_date = datetime.datetime.today()
+            self._running = False
+
             self._initialized = True
             self.logger.info('Initialized sucessfully.')
 
         except Exception as e:
-            self._trading_environment = ''
-            self._trading_universe = None
-            self._datatypes = None
-            self._txn_cost = None
-            self._initial_capital = 0.0
-            self._total_txn_cost = 0
-
-            self._running = False
-            self._current_cash = 0.0
-
-            self._mq_ip = ''
-            self._hook_ip = ''
-            self._hook_name = None
-
-            self._failed_tickers = list()
-            self.ticker_lot_size = dict()
-            self._topics = list()
-
-            self.logger.error(f'Failed to initialize algo, reason: {str(e)}')
             self._initialized = False
+            self.logger.error(f'Failed to initialize algo, reason: {str(e)}')
 
     async def daily_record_performance(self):
         while True:
@@ -605,8 +598,8 @@ class BaseAlgo(ABC):
             '_initial_capital', '_running', '_current_cash', 'pending_orders',
             'completed_orders', 'positions', 'slippage', 'ticker_lot_size', 'record', '_ip', '_mq_ip', '_hook_ip',
             '_zmq_context', '_mq_socket', '_topics', '_hook_name', 'cache_path', 'cache', '_max_cache',
-            '_ticker_max_cache',
-            '_cache_retain_ratio', 'cache_pickle_no_map', 'initialized_date', '_sanic', '_sanic_host', '_sanic_port',
+            '_per_ticker_max_cache',
+            '_drop_cache_ratio', 'cache_pickle_no_map', 'initialized_date', '_sanic', '_sanic_host', '_sanic_port',
             '_initialized', 'last_candlestick_time')
         for name, value in self.__dict__.items():
             if (type(value) in (list, str, float, int)) and (name not in restricted_attr):
@@ -789,7 +782,6 @@ class Backtest(BaseAlgo):
                    trading_universe: list, datatypes: list,
                    txn_cost: float = 30, max_cache: int = 50000, per_ticker_max_cache: int = 3000,
                    drop_cache_ratio: float = 0.3, test_mq_con=False, spread: float = 0.2 / 100):
-        # self.__init__(name=self.name, bars_no=self.bars_no, benchmark=self.benchmark)
         super().initialize(initial_capital=initial_capital, mq_ip=mq_ip, hook_ip=hook_ip,
                            hook_name=hook_name, trading_environment=trading_environment,
                            trading_universe=trading_universe,
@@ -807,7 +799,6 @@ class Backtest(BaseAlgo):
             self.logger.info('Environment is not BACKTEST')
             return
 
-        self._running = True
         self.logger.info(f'Backtesting Starts...')
 
         # No need to load ticker cache
