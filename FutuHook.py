@@ -58,8 +58,8 @@ class FutuKlineHandler(CurKlineHandlerBase):
 
     def on_recv_rsp(self, rsp_str):
         ret_code, df = super(FutuKlineHandler, self).on_recv_rsp(rsp_str)
-        k_type = df.k_type[0].upper()
         if ret_code == RET_OK:
+            k_type = df.k_type[0].upper()
             df = df[['code', 'time_key', 'open', 'high', 'low', 'close', 'volume', 'turnover']].rename(
                 columns={'time_key': 'datetime', 'code': 'ticker'})
             df['datetime'] = pd.to_datetime(df['datetime'])
@@ -101,7 +101,7 @@ class FutuOrderUpdateHandler(TradeOrderHandlerBase):
 
 
 class FutuHook():
-    def __init__(self, db_autosave_frequency=30 * 60):
+    def __init__(self, db_save_freq=30 * 60):
         # Get Environment Variables
         self.SANIC_HOST = os.getenv('SANIC_HOST')
         self.SANIC_PORT = os.getenv('SANIC_PORT')
@@ -119,62 +119,65 @@ class FutuHook():
 
         # Futu Context and Trade Context
         SysConfig.set_all_thread_daemon(True)
-        self.quote_manager = OpenQuoteContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+        self.quote_context = OpenQuoteContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
 
-        self.trade_manager = dict()
-        self.trade_manager['HK'] = OpenHKTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        self.trade_manager['US'] = OpenUSTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        self.trade_manager['CN'] = OpenCNTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        for market in ('HK', 'US', 'CN'):
-            self.trade_manager[market].set_handler(
-                FutuOrderUpdateHandler(queue=self.queue))
-        self.quote_manager.set_handler(FutuQuoteHandler(queue=self.queue))
-        self.quote_manager.set_handler(FutuKlineHandler(queue=self.queue))
+        self.trade_contexts = dict()
+        self.trade_contexts['HK'] = OpenHKTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+        self.trade_contexts['US'] = OpenUSTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+        self.trade_contexts['CN'] = OpenCNTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+        self.trade_contexts['HK'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        self.trade_contexts['US'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        self.trade_contexts['CN'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+
+        self.quote_context.set_handler(FutuQuoteHandler(queue=self.queue))
+        self.quote_context.set_handler(FutuKlineHandler(queue=self.queue))
 
         # Logger
         self.logger = Logger.RootLogger('FutuHook')
-        self.logger.debug('FutuHook trade unlock status {}'.format(self.unlock_trade()))
+        self.logger.debug(f'FutuHook trade unlock status {self.unlock_trade()}')
 
         # Create a dictionary for storing temporary dfs, which will be saved to MySQL later
-        self.tmp_records = collections.defaultdict(lambda: pd.DataFrame())
+        self.tmp_storage = collections.defaultdict(lambda: pd.DataFrame())
 
-        self._db_autosave_frequency = db_autosave_frequency
-        self._db_last_save_time = time.time()
+        self._db_save_freq = db_save_freq
+        self._db_last_saved = time.time()
 
         # ZMQ Publish and Pair sockets
         self.zmq_context = zmq.asyncio.Context()
         self.mq_socket = self.zmq_context.socket(zmq.PUB)
-        self.mq_socket.bind("tcp://127.0.0.1:{}".format(self.ZMQ_PORT))
+        self.mq_socket.bind(f"tcp://127.0.0.1:{self.ZMQ_PORT}")
         self.hello_socket = self.zmq_context.socket(zmq.PAIR)
-        self.hello_socket.bind("tcp://127.0.0.1:{}".format(int(self.ZMQ_PORT) + 1))
-        self.logger.debug('ZMQ publisher binded @ {}'.format("tcp://127.0.0.1:{}".format(self.ZMQ_PORT)))
-        self.logger.debug('ZMQ pair binded @ {}'.format("tcp://127.0.0.1:{}".format(int(self.ZMQ_PORT) + 1)))
+        self.hello_socket.bind(f"tcp://127.0.0.1:{int(self.ZMQ_PORT) + 1}")
+        self.logger.debug(f'ZMQ publisher binded @ tcp://127.0.0.1:{self.ZMQ_PORT}')
+        self.logger.debug(f'ZMQ pair binded @ tcp://127.0.0.1:{int(self.ZMQ_PORT) + 1}')
 
         # Sanic App
         self.app = Sanic('FutuHook')
+        self._running = False
 
     def unsubscribe(self, datatypes: list, tickers: list, unsubscribe_all=False):
-        return self.quote_manager.unsubscribe(tickers, datatypes, unsubscribe_all=unsubscribe_all)
+        return self.quote_context.unsubscribe(tickers, datatypes, unsubscribe_all=unsubscribe_all)
 
     def subscribe(self, datatypes: list, tickers: list):
-        return_content = self.quote_manager.subscribe(code_list=tickers, subtype_list=datatypes, is_first_push=False)
-        time.sleep(1)
-        while not self.queue.empty():
-            self.queue.get()
-            self.queue.task_done()
+        return_content = self.quote_context.subscribe(code_list=tickers, subtype_list=datatypes, is_first_push=False)
+        if not self._running:
+            time.sleep(1)
+            while not self.queue.empty():
+                self.queue.get()
+                self.queue.task_done()
         return return_content
 
     def unlock_trade(self):
-        ret_code_hk, data = self.trade_manager['HK'].unlock_trade(self.FUTU_TRADE_PWD)
-        ret_code_us, data = self.trade_manager['US'].unlock_trade(self.FUTU_TRADE_PWD)
-        ret_code_cn, data = self.trade_manager['CN'].unlock_trade(self.FUTU_TRADE_PWD)
+        ret_code_hk, data = self.trade_contexts['HK'].unlock_trade(self.FUTU_TRADE_PWD)
+        ret_code_us, data = self.trade_contexts['US'].unlock_trade(self.FUTU_TRADE_PWD)
+        ret_code_cn, data = self.trade_contexts['CN'].unlock_trade(self.FUTU_TRADE_PWD)
 
         if RET_ERROR in (ret_code_hk, ret_code_cn, ret_code_us):
             raise Exception("FutuHook: Trade Unlocked Failed")
-        return 'HK:{}   US:{}   CN:{}'.format(ret_code_hk, ret_code_us, ret_code_cn)
+        return f'HK:{ret_code_hk}   US:{ret_code_us}   CN:{ret_code_cn}'
 
     def query_subscriptions(self):
-        ret_code, sub = self.quote_manager.query_subscription()
+        ret_code, sub = self.quote_context.query_subscription()
         return ret_code, sub['sub_list']
 
     async def publish(self):
@@ -183,24 +186,25 @@ class FutuHook():
                 await asyncio.sleep(0.01)
             else:
                 while not self.queue.empty():
+
                     topic, df = self.queue.get()
                     datatype = topic.split('.')[1]
-                    self.tmp_records[datatype] = self.tmp_records[datatype].append(df)
+                    self.tmp_storage[datatype] = self.tmp_storage[datatype].append(df)
                     await self.mq_socket.send_multipart([bytes(topic, 'utf-8'), pickle.dumps(df)])
                     print(topic)
                     self.queue.task_done()
 
-            if (time.time() - self._db_last_save_time) > self._db_autosave_frequency:
-                for dtype in d_types:
-                    if not self.tmp_records[dtype].empty:
-                        df = self.tmp_records[dtype]
+            if (time.time() - self._db_last_saved) > self._db_save_freq:
+                for dtype in self.tmp_storage.keys():
+                    if not self.tmp_storage[dtype].empty:
+                        df = self.tmp_storage[dtype]
                         if ('datetime' in df.columns) and ('ticker' in df.columns):
                             df = df.drop_duplicates(subset=['ticker', 'datetime'], keep='last')
 
-                        self.tmp_records[dtype] = pd.DataFrame()
+                        self.tmp_storage[dtype] = pd.DataFrame()
                         await self.insert_data(datatype=dtype, df=df)
 
-                self._db_last_save_time = time.time()
+                self._db_last_saved = time.time()
 
     async def ping_pong(self):
         while True:
@@ -222,7 +226,7 @@ class FutuHook():
             tasks.append(self.ping_pong())
             await self.db_create_schemas()
             await asyncio.gather(*tasks)
-
+        self._running = True
         loop.create_task(_run())
         loop.run_forever()
 
@@ -326,17 +330,16 @@ class FutuHook():
             conn.close()
 
     async def db_get_historicals(self, datatype, ticker, start_date: str, end_date: str):
-        sql = """SELECT * FROM {}.FUTU_{} where ticker = '{}'""".format(self.MYSQL_DB,
-                                                                        datatype, ticker)
+        sql = f"""SELECT * FROM {self.MYSQL_DB}.FUTU_{datatype} where ticker = '{ticker}'"""
         if start_date or end_date:
             sql += """ and """
             if start_date and end_date:
-                sql += """ datetime >= '{}' and datetime <= '{}'""".format(start_date, end_date)
+                sql += f""" datetime >= '{start_date}' and datetime <= '{end_date}'"""
             else:
                 if start_date is not None:
-                    sql += "datetime >= '{}'".format(start_date)
+                    sql += f"datetime >= '{start_date}'"
                 else:
-                    sql += "datetime <= '{}'".format(end_date)
+                    sql += f"datetime <= '{end_date}'"
         conn = await self.db_get_conn()
         cur = await conn.cursor()
         await cur.execute(sql)
@@ -361,7 +364,7 @@ class FutuHook():
 
     # GET: None
     async def get_subscriptions(self, request):
-        ret_code, sub = self.quote_manager.query_subscription()
+        ret_code, sub = self.quote_context.query_subscription()
         data = {'ret_code': 1 if ret_code != RET_ERROR else 0, 'return': {'content': sub}}
         return response.json(data)
 
@@ -373,7 +376,7 @@ class FutuHook():
         if method == 'SUBSCRIBE':
             ret_code, df = self.subscribe(tickers=tickers, datatypes=dtypes)
             if ret_code == RET_OK:
-                ret_code, sub = self.quote_manager.query_subscription()
+                ret_code, sub = self.quote_context.query_subscription()
                 data = {'ret_code': 1, 'return': {'content': sub}}
             else:
                 data = {'ret_code': 1, 'return': {'content': df}}
@@ -381,7 +384,7 @@ class FutuHook():
         elif method == 'UNSUBSCRIBE':
             ret_code, df = self.unsubscribe(tickers=tickers, datatypes=dtypes)
             if ret_code == RET_OK:
-                ret_code, sub = self.quote_manager.query_subscription()
+                ret_code, sub = self.quote_context.query_subscription()
                 data = {'ret_code': 1, 'return': {'content': sub}}
             else:
                 data = {'ret_code': 1, 'return': {'content': df}}
@@ -398,9 +401,9 @@ class FutuHook():
 
         df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
                                            end_date=end_date)
-        if self.tmp_records[datatype].shape[0] != 0:
+        if self.tmp_storage[datatype].shape[0] != 0:
             df = df.append(
-                self.tmp_records[datatype].loc[self.tmp_records[datatype]['ticker'] == ticker])
+                self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
         if df.shape[0] != 0:
             df['datetime'] = pd.to_datetime(df['datetime'])
             df = df.drop_duplicates(
@@ -421,7 +424,7 @@ class FutuHook():
         end_date = datetime.today().strftime('%Y-%m-%d') if end_date is None else end_date
 
         if from_exchange:
-            result = self.quote_manager.request_history_kline(code=ticker, ktype=datatype,
+            result = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
                                                               start=start_date,
                                                               end=end_date, max_count=None)
             ret_code, df = result[0], result[1]
@@ -436,9 +439,9 @@ class FutuHook():
         else:
             df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
                                                end_date=end_date)
-            if self.tmp_records[datatype].shape[0] != 0:
+            if self.tmp_storage[datatype].shape[0] != 0:
                 df = df.append(
-                    self.tmp_records[datatype].loc[self.tmp_records[datatype]['ticker'] == ticker])
+                    self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
             if df.shape[0] != 0:
                 df['datetime'] = pd.to_datetime(df['datetime'])
                 df = df.drop_duplicates(
@@ -483,9 +486,9 @@ class FutuHook():
         assert quantity is not None, 'quantity cannot be empty'
         quantity = int(quantity)
         if order_type == 'MARKET':
-            ret_code, df = self.trade_manager[market].place_order(price=0.0, qty=abs(quantity),
-                                                                  code=ticker, order_type=order_type,
-                                                                  trd_env=trade_environment, trd_side=trade_side)
+            ret_code, df = self.trade_contexts[market].place_order(price=0.0, qty=abs(quantity),
+                                                                   code=ticker, order_type=order_type,
+                                                                   trd_env=trade_environment, trd_side=trade_side)
             price = 'MARKET'
         else:
             price = request.form.get('price')
@@ -493,12 +496,13 @@ class FutuHook():
             price = float(price)
             adjust_limit = request.form.get('adjust_limit')
             adjust_limit = 0.0 if adjust_limit is None else float(adjust_limit)
-            ret_code, df = self.trade_manager[market].place_order(price=price, qty=abs(quantity),
-                                                                  code=ticker, order_type=order_type,
-                                                                  trd_env=trade_environment, trd_side=trade_side,
-                                                                  adjust_limit=adjust_limit)
+            ret_code, df = self.trade_contexts[market].place_order(price=price, qty=abs(quantity),
+                                                                   code=ticker, order_type=order_type,
+                                                                   trd_env=trade_environment, trd_side=trade_side,
+                                                                   adjust_limit=adjust_limit)
         if ret_code == RET_OK:
             order_id = df['order_id'].iloc[0]
+            df = df.rename(columns={'code': 'ticker'})
             self.logger.info(
                 'ORDER: Placed order to buy {} shares of {} @ {}, order_id: {}'.format(quantity, ticker, price,
                                                                                        order_id))
@@ -540,11 +544,11 @@ class FutuHook():
             price = 0.0
             adjust_limit = 0.0
 
-        ret_code, df = self.trade_manager[market].modify_order(order_id=order_id,
-                                                               modify_order_op=action,
-                                                               price=price, qty=abs(quantity),
-                                                               trd_env=trade_environment,
-                                                               adjust_limit=adjust_limit)
+        ret_code, df = self.trade_contexts[market].modify_order(order_id=order_id,
+                                                                modify_order_op=action,
+                                                                price=price, qty=abs(quantity),
+                                                                trd_env=trade_environment,
+                                                                adjust_limit=adjust_limit)
 
         if ret_code == RET_OK:
             return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
@@ -566,7 +570,7 @@ class FutuHook():
         end_date = request.form.get('end_date')
         end_date = datetime.today().strftime('%Y-%m-%d') if end_date is None else end_date
 
-        ret = self.quote_manager.request_history_kline(code=ticker, ktype=datatype,
+        ret = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
                                                        start=start_date,
                                                        end=end_date, max_count=None)
         ret_code = ret[0]
@@ -590,7 +594,7 @@ class FutuHook():
             tickers = eval(tickers)
         else:
             raise Exception('tickers should be a list')
-        ret_code, data = self.quote_manager.get_stock_basicinfo(market=tickers[0].upper().split('.')[0],
+        ret_code, data = self.quote_context.get_stock_basicinfo(market=tickers[0].upper().split('.')[0],
                                                                 code_list=tickers)
         if ret_code == 0:
             df = data[['code', 'lot_size']].rename(columns={'code': 'tickers'}).set_index('tickers', drop=True)
@@ -618,5 +622,3 @@ if __name__ == '__main__':
     futu_hook = FutuHook()
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)
     futu_hook.run()
-
-
