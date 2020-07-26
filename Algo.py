@@ -894,7 +894,7 @@ class Backtest(BaseAlgo):
         return 1, pd.DataFrame(backtest_trade, index=[0])
 
     # ------------------------------------------------ [ Report ] ------------------------------------------
-    def plot_ticker(self, datatype, ticker):
+    def plot_ticker_trades(self, datatype, ticker):
         orders_df = self.completed_orders.loc[self.completed_orders.ticker == ticker].rename(
             columns={'created_time': 'datetime'})
         ticker_df = self.cache[datatype].loc[self.cache[datatype].ticker == ticker]
@@ -909,6 +909,16 @@ class Backtest(BaseAlgo):
         plt.scatter(x=ticker_df['x'], y=ticker_df['buy_y'], marker='o', color='green', s=100)
         plt.scatter(x=ticker_df['x'], y=ticker_df['sell_y'], marker='o', color='red', s=100)
         plt.plot(ticker_df['close'])
+
+    def report(self, benchmark):
+        import quantstats as qs
+        import webbrowser
+
+        PV = self.records.PV
+        PV.index = pd.to_datetime(PV.index)
+        html = f'{self.name}.html'
+        qs.reports.html(PV, benchmark, output=html, title=f'{self.name} vs {benchmark} report')
+        webbrowser.open(html)
 
 
 if __name__ == '__main__':
