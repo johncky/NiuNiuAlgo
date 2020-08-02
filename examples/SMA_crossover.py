@@ -2,13 +2,14 @@ from Algo import CandlestickStrategy
 import datetime
 import talib
 
+reconciliation_trades = 'Trade_Recon/{}.xlsx'
+
 
 class SMACrossover(CandlestickStrategy):
     def __init__(self, short, long):
         super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long+1)
         self.short = short
         self.long = long
-        self._test_df = None
 
     async def on_bar(self, datatype, ticker, df):
         if datatype == 'K_3M':
@@ -24,15 +25,16 @@ class SMACrossover(CandlestickStrategy):
             print(f'Datetime: {df["datetime"].iloc[-1]} , Last: {sma_short_last}/{sma_long_last}, Current: {sma_short_cur}/{sma_long_cur}')
             print('\n')
 
-            self._test_df = df
-
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-                self.buy_limit(ticker=ticker, quantity=self.cal_max_buy_qty(ticker),
+                self.buy_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                price=self.get_price(ticker=ticker))
 
+                df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M")}_BUY_{ticker}.xlsx')
+
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-                self.sell_limit(ticker=ticker, quantity=self.get_qty(ticker),
+                self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                       price=self.get_price(ticker=ticker))
+                df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M")}_SELL_{ticker}.xlsx')
         else:
             pass
 
@@ -55,7 +57,7 @@ class SMACrossover(CandlestickStrategy):
 
 if __name__ == '__main__':
     algo = SMACrossover(short=10, long=20)
-    algo.initialize(initial_capital=200000.0, mq_ip='tcp://127.0.0.1:8001',
+    algo.initialize(initial_capital=20000000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='SIMULATE',
                     trading_universe=['HK.00700', 'HK.54544554', 'HK.09988', 'HK.09999', 'HK.02318'], datatypes=['K_3M'])

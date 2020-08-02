@@ -16,6 +16,7 @@ import itertools
 import shutil
 import collections
 import json
+import random
 
 
 class BaseAlgo(ABC):
@@ -477,7 +478,7 @@ class BaseAlgo(ABC):
         if ret_code == 1:
             self.add_cache(datatype=datatype, df=df)
         else:
-            raise Exception('Failed to download historical data from Hook')
+            raise Exception(f'Failed to download historical data from Hook, reason: {df}')
 
     def load_all_cache(self, tickers=None,
                        start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')):
@@ -490,10 +491,7 @@ class BaseAlgo(ABC):
     def load_ticker_lot_size(self, tickers):
         params = {'tickers': str(tickers)}
 
-        result = requests.get(self._hook_ip + '/order/lot_size', params=params)
-        if result.status_code == 500:
-            raise Exception(f'Format of one/more tickers are wrong, please check: {tickers}')
-        result = result.json()
+        result = requests.get(self._hook_ip + '/order/lot_size', params=params).json()
         if result['ret_code'] == 1:
             lot_size_df = pd.read_json(result['return']['content'])
             failed = list(lot_size_df.loc[lot_size_df['lot_size'] == 0].index)
@@ -521,7 +519,7 @@ class BaseAlgo(ABC):
             return 0, f'Risk check failed: {msg}'
 
         trade_url = self._hook_ip + '/order/place'
-        params = {'ticker': ticker, 'trade_side': trade_side, 'order_type': order_type, 'quantity': quantity,
+        params = {'ticker': ticker, 'trade_side': trade_side, 'order_type': order_type, 'quantity': int(quantity),
                   'price': price, 'trade_environment': self._trading_environment}
 
         result = requests.post(trade_url, data=params).json()
@@ -549,12 +547,12 @@ class BaseAlgo(ABC):
         return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='NORMAL', price=price)
 
     def risk_check(self, ticker, quantity, trade_side, price):
-        trade_sign = -1 if trade_side in ('BUY', 'BUY_BACK') else 1
+        trade_sign = -1 if trade_side == 'BUY' else 1
         price = self.positions.loc[ticker]['price'] if price == 0.0 else price
         exp_cash_change = price * quantity * trade_sign
 
         if quantity <= 0:
-            return 0, f'Quantity cannot be >= 0! '
+            return 0, f'Quantity cannot be <= 0! '
 
         if self._current_cash + exp_cash_change < 0:
             return 0, f'Not enough cash, current cash:{self._current_cash} , required cash:{-exp_cash_change}'
@@ -577,10 +575,11 @@ class BaseAlgo(ABC):
     def get_lot_size(self, ticker):
         return self.ticker_lot_size[ticker]
 
-    def cal_max_buy_qty(self, ticker):
+    def cal_max_buy_qty(self, ticker, cash=None):
+        cash = self._current_cash if cash is None else cash
         lot_size = self.get_lot_size(ticker)
         one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker)
-        max_qty_by_cash = (self._current_cash - self._current_cash % one_hand_size) / one_hand_size * lot_size
+        max_qty_by_cash = (cash - cash % one_hand_size) / one_hand_size * lot_size
         return max_qty_by_cash
 
     @property
@@ -837,18 +836,32 @@ class Backtest(BaseAlgo):
 
         self.logger.info(f'Loaded Data, backtesting starts...')
 
+
         async def _backtest():
             self._order_queue = list()
             # For progress bar
             last_percent = 0
-            self.log(backtest_df.iloc[0]['datetime'].date())
+            self.log(overwrite_date=backtest_df.iloc[0]['datetime'].date())
             for i in range(backtest_df.shape[0]):
+                cur_df = backtest_df.iloc[i:i + 1]
+                datatype = cur_df['datatype'].iloc[-1]
+                ticker = cur_df['ticker'].iloc[-1]
+                self._cur_candlestick_datetime = cur_df['datetime'].iloc[-1]
+
                 # trigger orderUpdate first
                 if len(self._order_queue) != 0:
+                    tmp_order_queue = list()
                     for order_no in range(len(self._order_queue)):
-                        order_update_df = self._order_queue.pop()
-                        self.update_positions(df=order_update_df)
-                        await self.on_order_update(order_id=order_update_df['order_id'].iloc[-1], df=order_update_df)
+                        action_type, data = self._order_queue.pop()
+                        if action_type == 'UPDATE':
+                            await self.on_order_update(order_id=data['order_id'].iloc[-1], df=data)
+                        elif action_type == 'EXECUTE':
+                            if datatype == data['datatype'] and ticker == data['ticker']:
+                                self.trade(ticker=data['ticker'], trade_side=data['trade_side'],
+                                            order_type='MARKET', quantity=data['quantity'], price=cur_df['open'].iloc[-1])
+                            else:
+                                tmp_order_queue.append((action_type, data))
+                    self._order_queue = self._order_queue + tmp_order_queue
 
                 # Progress Bar
                 cur_percent = int(i / backtest_df.shape[0] * 100)
@@ -857,20 +870,16 @@ class Backtest(BaseAlgo):
                     last_percent = cur_percent
 
                 # log performance
-                tmp_df = backtest_df.iloc[i:i + 1]
-                cur_candlestick_datetime = tmp_df['datetime'].iloc[-1]
-                self._cur_candlestick_datetime = cur_candlestick_datetime
                 if i > 0:
-                    last_date = backtest_df.iloc[i - 1:i]['datetime'].iloc[-1].date()
-                    if cur_candlestick_datetime.date() != last_date:
+                    last_date = backtest_df.iloc[i - 1:i]['datetime'].iloc[0].date()
+                    if self._cur_candlestick_datetime.date() != last_date:
                         self.log(overwrite_date=last_date)
-                datatype = tmp_df['datatype'].iloc[-1]
-                ticker = tmp_df['ticker'].iloc[-1]
 
-                self.update_prices(datatype=datatype, df=tmp_df)
-                self.add_cache(datatype=datatype, df=tmp_df)
+
+                self.update_prices(datatype=datatype, df=cur_df)
+                self.add_cache(datatype=datatype, df=cur_df)
                 trigger_strat, (tgr_dtype, tgr_ticker, tgr_df) = self.determine_trigger(datatype=datatype,
-                                                                                        ticker=ticker, df=tmp_df)
+                                                                                        ticker=ticker, df=cur_df)
                 if trigger_strat:
                     await self.trigger_strat(datatype=tgr_dtype, ticker=tgr_ticker, df=tgr_df)
 
@@ -879,22 +888,58 @@ class Backtest(BaseAlgo):
         asyncio.run(_backtest())
 
     def trade(self, ticker, trade_side, order_type, quantity, price):
-        import random
         risk_passed, msg = self.risk_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
         if not risk_passed:
+            self.logger.warn(
+                f'Risk check for order "{trade_side} {quantity} qty of {ticker} @ {price}" did not pass, reasons: {msg}')
+            backtest_trade = {'order_id': hash(random.random()), 'ticker': ticker, 'price': 0,
+                              'trd_side': trade_side, 'order_status': 'FAILED',
+                              'dealt_avg_price': 0,
+                              'dealt_qty': 0, 'created_time': 0, 'last_err_msg': f'Risk check failed: {msg}'}
+
+            order_update_df = pd.DataFrame(backtest_trade, index=[0])
+            self._order_queue.append(('UPDATE', order_update_df))
             return 0, f'Risk check failed: {msg}'
+
         spread_ajust_sign = 1 if 'BUY' in trade_side else -1
+        order_datetime = self._cur_candlestick_datetime
         spread_adjusted_price = price * (1 + (spread_ajust_sign * self._spread))
 
         backtest_trade = {'order_id': hash(random.random()), 'ticker': ticker, 'price': price,
                           'trd_side': trade_side, 'order_status': 'FILLED_ALL',
                           'dealt_avg_price': spread_adjusted_price,
-                          'dealt_qty': quantity}
+                          'dealt_qty': quantity, 'created_time': order_datetime}
+
         order_update_df = pd.DataFrame(backtest_trade, index=[0])
-        # TODO: created_time may not be needed
-        order_update_df['created_time'] = self._cur_candlestick_datetime
-        self._order_queue.append(order_update_df)
-        return 1, pd.DataFrame(backtest_trade, index=[0])
+        self.update_positions(df=order_update_df)
+        self._order_queue.append(('UPDATE', order_update_df))
+        return 1, f'Placed order: {order_type} {quantity} qty of {ticker} @ {price}'
+
+    def buy_market(self, ticker, quantity):
+        # Buy at current close
+        return self.trade(ticker=ticker, quantity=quantity, trade_side='BUY', order_type='MARKET', price=self.get_price(ticker))
+
+    def sell_market(self, ticker, quantity):
+        # Sell at current close
+        return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='MARKET', price=self.get_price(ticker))
+
+    def buy_limit(self, ticker, quantity, price):
+        # Buy at current close
+        return self.trade(ticker=ticker, quantity=quantity, trade_side='BUY', order_type='NORMAL', price=self.get_price(ticker))
+
+    def sell_limit(self, ticker, quantity, price):
+        # Sell at current close
+        return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='NORMAL', price=self.get_price(ticker))
+
+    def buy_next_open(self, datatype, ticker, quantity):
+        # Buy at next open of that datatype
+        self._order_queue.append(('EXECUTE', {'datatype': datatype, 'ticker': ticker, 'quantity': quantity, 'trade_side': 'BUY'}))
+        return 1, f'Buy {quantity} {ticker} @ next {datatype} open'
+
+    def sell_next_open(self, datatype, ticker, quantity):
+        # Sell at next open of that datatype
+        self._order_queue.append(('EXECUTE', {'datatype': datatype, 'ticker': ticker, 'quantity': quantity, 'trade_side': 'SELL'}))
+        return 1, f'Sell {quantity} {ticker} @ next {datatype} open'
 
     # ------------------------------------------------ [ Report ] ------------------------------------------
     def plot_ticker_trades(self, datatype, ticker):
@@ -925,7 +970,6 @@ class Backtest(BaseAlgo):
         html = f'{self.name}.html'
         qs.reports.html(PV, benchmark, output=html, title=f'{self.name} vs {benchmark}')
         webbrowser.open(html)
-
 
 if __name__ == '__main__':
     pass

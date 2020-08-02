@@ -267,3 +267,7 @@ in Webapp/app.py:
 
 <h3> Interface </h3>
 <img src="https://github.com/johncky/FutuAlgo/blob/master/docs/interface.png">
+
+<h2>Notes</h2>
+<ol>
+<li>Cash is deducted after order is filled. If you place a new order before previous one is filled, you might end up with negative cash balance.</li>
