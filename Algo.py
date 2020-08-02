@@ -579,9 +579,11 @@ class BaseAlgo(ABC):
         cash = self._current_cash if cash is None else cash
         lot_size = self.get_lot_size(ticker)
         one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker)
-        max_qty_by_cash = (cash - cash % one_hand_size) / one_hand_size * lot_size
-        return max_qty_by_cash
-
+        if cash >= one_hand_size:
+            max_qty_by_cash = int((cash - cash % one_hand_size) / one_hand_size) * lot_size
+            return max_qty_by_cash
+        else:
+            return 0
     @property
     def cash(self):
         return self._current_cash

@@ -25,7 +25,7 @@ class SMACrossover(Backtest):
         self._test_df = df
 
         if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-            self.buy_next_open(ticker=ticker, quantity=self.get_lot_size(ticker), datatype='K_DAY')
+            self.buy_next_open(ticker=ticker, quantity=self.cal_max_buy_qty(ticker, cash=self.records.PV.iloc[-1]/4*0.8), datatype='K_DAY')
             # df.to_excel(f'Trade_Recon/{df["datetime"].iloc[-1].strftime("%Y%m%d_%H_%M")}_BUY_{ticker}.xlsx')
 
         elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
