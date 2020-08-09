@@ -10,7 +10,6 @@ class BacktestResult:
     def annualized_return(self):
         return
 
-    def
 
 def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: float = 0.0):
     # Very quick backtesting function, give it a df that contains columns: datetime, open, close, signal, qty
