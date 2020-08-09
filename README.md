@@ -156,10 +156,10 @@ class SMACrossover(CandlestickStrategy):
 <h3> Backtesting - quick backtest using df</h3>
 <p>Just a quick backtesting function for simple strategies:
 give it a df with column datetime, open, close, signal, qty:</p>
-<p><br></br>
+<p>
 'signal' column: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
 </p>
-<p><br></br>
+<p>
 'qty' column: quantity value (float or int) to trade, or "ALL"
 </p>
 
