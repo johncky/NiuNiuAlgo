@@ -24,17 +24,18 @@ class SMACrossover(CandlestickStrategy):
 
             print(f'Datetime: {df["datetime"].iloc[-1]} , Last: {sma_short_last}/{sma_long_last}, Current: {sma_short_cur}/{sma_long_cur}')
             print('\n')
+            df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_{ticker}.xlsx')
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
                 self.buy_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                               price=self.get_price(ticker=ticker))
+                               price=self.get_price(ticker=ticker)+1)
 
-                df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M")}_BUY_{ticker}.xlsx')
+                df.to_excel(f'Trade_Recon_Trade/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_BUY_{ticker}.xlsx')
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
                 self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                                      price=self.get_price(ticker=ticker))
-                df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M")}_SELL_{ticker}.xlsx')
+                                      price=self.get_price(ticker=ticker)-1)
+                df.to_excel(f'Trade_Recon_Trade/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_SELL_{ticker}.xlsx')
         else:
             pass
 

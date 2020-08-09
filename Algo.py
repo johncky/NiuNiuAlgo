@@ -471,9 +471,8 @@ class BaseAlgo(ABC):
     def load_ticker_cache(self, ticker, datatype,
                           start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d'),
                           from_exchange=False):
-        end_date = datetime.datetime.today().strftime('%Y-%m-%d')
         ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
-                                                end_date=end_date, from_exchange=from_exchange)
+                                                end_date=None, from_exchange=from_exchange)
 
         if ret_code == 1:
             self.add_cache(datatype=datatype, df=df)
@@ -575,15 +574,16 @@ class BaseAlgo(ABC):
     def get_lot_size(self, ticker):
         return self.ticker_lot_size[ticker]
 
-    def cal_max_buy_qty(self, ticker, cash=None):
+    def cal_max_buy_qty(self, ticker, cash=None, adjust_limit=1.03):
         cash = self._current_cash if cash is None else cash
         lot_size = self.get_lot_size(ticker)
-        one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker)
+        one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker) * adjust_limit
         if cash >= one_hand_size:
             max_qty_by_cash = int((cash - cash % one_hand_size) / one_hand_size) * lot_size
             return max_qty_by_cash
         else:
             return 0
+
     @property
     def cash(self):
         return self._current_cash

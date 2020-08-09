@@ -10,7 +10,8 @@ class SMACrossover(Backtest):
         super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long+5)
         self.short = short
         self.long = long
-        self._test_df = None
+        self._test_df = dict()
+        self.rq = dict()
 
     async def on_bar(self, datatype, ticker, df):
         df['SMA_short'] = df['close'].rolling(self.short).mean()
@@ -22,10 +23,14 @@ class SMACrossover(Backtest):
         sma_long_last = df['SMA_long'].iloc[-2]
         sma_long_cur = df['SMA_long'].iloc[-1]
 
-        self._test_df = df
+        self._test_df[df.datetime.iloc[-1].strftime('%Y-%m-%d')] = df
+        self.rq[df.datetime.iloc[-1].strftime('%Y-%m-%d')] = {'first': sma_short_last <= sma_long_last,
+                                                              'second': sma_short_cur > sma_long_cur,
+                                                              'third': self.get_qty(ticker) == 0,
+                                                              'qty': self.get_qty(ticker)}
 
         if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-            self.buy_next_open(ticker=ticker, quantity=self.cal_max_buy_qty(ticker, cash=self.records.PV.iloc[-1]/4*0.8), datatype='K_DAY')
+            self.buy_next_open(ticker=ticker, quantity=self.cal_max_buy_qty(ticker), datatype='K_DAY')
             # df.to_excel(f'Trade_Recon/{df["datetime"].iloc[-1].strftime("%Y%m%d_%H_%M")}_BUY_{ticker}.xlsx')
 
         elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
@@ -53,5 +58,6 @@ if __name__ == '__main__':
     algo.initialize(initial_capital=200000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='BACKTEST',
-                    trading_universe=['HK.00700', 'HK.00388', 'HK.02382', 'HK.02318'], datatypes=['K_DAY'], spread=0.1/100, txn_cost=16)
-    # algo.backtest('2015-01-01', '2020-07-01')
+                    trading_universe=['HK.00700'], datatypes=['K_DAY'], spread=0, txn_cost=0)
+
+    algo.backtest('2015-01-01', '2020-07-01')

@@ -330,16 +330,19 @@ class FutuHook():
             conn.close()
 
     async def db_get_historicals(self, datatype, ticker, start_date: str, end_date: str):
+        end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d') if end_date is None else end_date
+
         sql = f"""SELECT * FROM {self.MYSQL_DB}.FUTU_{datatype} where ticker = '{ticker}'"""
         if start_date or end_date:
             sql += """ and """
             if start_date and end_date:
-                sql += f""" datetime >= '{start_date}' and datetime <= '{end_date}'"""
+                sql += f""" datetime >= '{start_date}' and datetime < '{end_date}'"""
             else:
                 if start_date is not None:
                     sql += f"datetime >= '{start_date}'"
                 else:
-                    sql += f"datetime <= '{end_date}'"
+                    sql += f"datetime < '{end_date}'"
+
         conn = await self.db_get_conn()
         cur = await conn.cursor()
         await cur.execute(sql)
@@ -404,7 +407,6 @@ class FutuHook():
             ticker = request.args.get('ticker')
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
-            end_date = datetime.today().strftime('%Y-%m-%d') if end_date is None else end_date
 
             df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
                                                end_date=end_date)
@@ -431,7 +433,6 @@ class FutuHook():
             ticker = request.args.get('ticker')
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
-            end_date = datetime.today().strftime('%Y-%m-%d') if end_date is None else end_date
 
             if from_exchange:
                 result = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
