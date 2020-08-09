@@ -1,14 +1,36 @@
 import pandas as pd
 import numpy as np
 from examples import research_tools
+import quantstats as qs
 
 class BacktestResult:
     def __init__(self, result_df, trade_df):
         self.result_df = result_df
         self.trade_df = trade_df
 
-    def annualized_return(self):
-        return
+    def report(self, benchmark):
+        import webbrowser
+
+        PV = self.result_df.set_index('datetime')['pv']
+        html = 'backtest result.html'
+        qs.reports.html(PV, benchmark, output=html, title=f'Backtest result')
+        webbrowser.open(html)
+
+    def plot(self):
+        df = self.result_df.copy()
+        df['trade_qty'] = df['quantity'].diff()
+        df['buy_pt'] = [1 if qty_dif > 0 else None for qty_dif in df['trade_qty']]
+        df['sell_pt'] = [1 if qty_dif < 0 else None for qty_dif in df['trade_qty']]
+        df['buy_y'] = df['buy_pt'] * df['close']
+        df['sell_y'] = df['sell_pt'] * df['close']
+        df['x'] = df['datetime']
+        from matplotlib import pyplot as plt
+        plt.scatter(x=df['x'], y=df['buy_y'].values, marker='o', color='green', s=100)
+        plt.scatter(x=df['x'], y=df['sell_y'].values, marker='o', color='red', s=100)
+        plt.ylabel(f'price')
+        plt.plot(df['x'], df['close'])
+        plt.title(f'Entry-exit points')
+
 
 
 def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: float = 0.0):
@@ -176,8 +198,10 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
     completed_df['pv'] = completed_df['pv'].astype(float)
     completed_df['interval return'] = np.log(completed_df['pv']).diff()
     completed_df['datetime'] = pd.to_datetime(completed_df['datetime'])
+    trades = trades.reset_index()
     trades['datetime'] = pd.to_datetime(trades['datetime'])
-    return BacktestResult(result_df=completed_df, trade_df = trades)
+    return BacktestResult(result_df=completed_df, trade_df=trades)
+
 
 if __name__ == '__main__':
     df = research_tools.download_data('K_DAY', 'HK.00700')
