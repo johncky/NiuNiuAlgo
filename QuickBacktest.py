@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-from examples import research_tools
 import quantstats as qs
+
 
 class BacktestResult:
     def __init__(self, result_df, trade_df):
@@ -36,7 +36,7 @@ class BacktestResult:
 def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: float = 0.0):
     # Very quick backtesting function, give it a df that contains columns: datetime, open, close, signal, qty
     # signal column should contain: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
-    # qty: INT type quantity to trade, or "ALL"
+    # qty: quantity value (float or int) to trade, or "ALL"
     # fee_mode: str: FIXED:FLOAT or QTY:FLOAT
 
     records = pd.DataFrame(columns=['cash', 'quantity'])
@@ -204,6 +204,7 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
 
 
 if __name__ == '__main__':
+    from examples import research_tools
     df = research_tools.download_data('K_DAY', 'HK.00700')
     df['sma16'] = df['close'].rolling(16).mean()
     df['sma32'] = df['close'].rolling(32).mean()

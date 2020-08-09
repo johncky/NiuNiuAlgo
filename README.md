@@ -153,9 +153,57 @@ class SMACrossover(CandlestickStrategy):
                     trading_universe=['HK.00700', 'HK_FUTURE.HSImain'], datatypes=['K_3M'])
     algo.run(5000)
 ```
+<h3> Backtesting - quick backtest using df</h3>
+<p>Just a quick backtesting function for simple strategies:
+give it a df with column datetime, open, close, signal, qty:</p>
+<p><br></br>
+'signal' column: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
+</p>
+<p><br></br>
+'qty' column: quantity value (float or int) to trade, or "ALL"
+</p>
 
-<h3> Backtesting </h3>
-<p>Currently only candlesticks strategies supports backtesting.(FutuNiuNiu only supports historical data of candlsticks data)
+```python
+    # df with column datetime, open, close, qty, signal
+    df['sma16'] = df['close'].rolling(16).mean()
+    df['sma32'] = df['close'].rolling(32).mean()
+    df['dif'] = df['sma16'] - df['sma32']
+    df['pre_dif'] = df['dif'].shift(1)
+    df = df.dropna()
+    signal = list()
+    for id, row in df.iterrows():
+        if row['dif'] > 0 and row['pre_dif'] <= 0:
+            signal.append('COVER AND LONG')
+        elif row['dif'] < 0 and row['pre_dif'] >= 0:
+            signal.append('EXIT AND SHORT')
+        else:
+            signal.append('PASS')
+    # trading signal
+    df['signal'] = signal
+    # always all-in, used all the cash, or buying power (equal to portfolio value: equity value + cash)
+    df['qty'] = 'ALL'
+    
+    # buy at next open when signal is received, with spread 0.2%, fixed fee of 16 HKD
+    backtest_result = backtest(df, capital=100000, buy_at_open=True, spread=0.2/100, fee_mode='FIXED:16')
+
+```
+
+<h3> Backtesting report </h3>
+
+```python
+    # Use tencent 0700 as benchmark. This will open a webbrowser showing the full report.
+    backtest_result.report(benchmark='0700.HK')
+```
+
+<h4>Plot entry and exit points</h4>
+
+```python
+    # Plot exit-entry point 
+    backtest_result.plot()
+```
+
+<h3> Backtesting - Using Algo Class</h3>
+<p>You can use live trading algo class to backtest. However, only for candlestick-based strategies(FutuNiuNiu only supports historical data of candlsticks data)
 To backtest a strategies, inhertie from Backtest class, and run algo.backtest().
 Please Note that you must fill your MySQL database with historical data first. You can do so through FutuHook API /db/fill.
 </p>
@@ -220,26 +268,14 @@ Powered by <a href="https://github.com/ranaroussi/quantstats">Quantstats by Ran 
 </br>
 
 ```python
-    algo = SMACrossover(short=16,long=32)
-    algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
-                    hook_ip='http://127.0.0.1:8000',
-                    hook_name='FUTU', trading_environment='BACKTEST',
-                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
-    algo.backtest(start_date = '2020-04-01', end_date = '2020-05-01')
-    # Use tencent 0700 as benchmark! This will open a brower showing the full report.
+    # Use tencent 0700 as benchmark. This will open a webbrowser showing the full report.
     algo.report(benchmark='0700.HK')
 ```
 
 <h4>Plot entry and exit points</h4>
 
 ```python
-    algo = SMACrossover(short=16,long=32)
-    algo.initialize(initial_capital=200000.0, margin=200000.0, mq_ip='tcp://127.0.0.1:8001',
-                    hook_ip='http://127.0.0.1:8000',
-                    hook_name='FUTU', trading_environment='BACKTEST',
-                    trading_universe=['HK.00700', 'HK.54544554','HK.00388'], datatypes=['K_DAY'], spread=0)
-    algo.backtest(start_date = '2020-04-01', end_date = '2020-05-01')
-    # Use tencent 0700 as benchmark! This will open a brower showing the full report.
+    # Plot exit-entry point of this ticker
     algo.plot_ticker_trades('K_DAY', 'HK.00700')
 ```
 
