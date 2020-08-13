@@ -32,10 +32,32 @@ class BacktestResult:
         plt.title(f'Entry-exit points')
 
 
+def standard_specified_signal(row, cur_cash, cur_qty, action_price, action_dt):
+    return row['signal'].upper(), row['qty']
 
-def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: float = 0.0):
+
+def percent_invested_signal(row, cur_cash, cur_qty, action_price, action_dt):
+    if row['%'] == '':
+        return "PASS", 0
+    ev = cur_qty * action_price
+    pv = cur_cash + ev
+    required_qty = int(pv * float(row['%']) / action_price)
+
+
+    action_qty = required_qty - cur_qty
+    if action_qty == 0:
+        return "PASS", 0
+    if action_qty > 0:
+        return "LONG", action_qty
+    else:
+        return "SHORT", abs(action_qty)
+
+
+
+
+def backtest(df, capital, buy_at_open=True, spread: float = 0.0, fee_mode: str = 'FIXED:0', signal_func=standard_specified_signal):
     # Very quick backtesting function, give it a df that contains columns: datetime, open, close, signal, qty
-    # signal column should contain: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
+    # signal column: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
     # qty: quantity value (float or int) to trade, or "ALL"
     # fee_mode: str: FIXED:FLOAT or QTY:FLOAT
 
@@ -51,7 +73,6 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
     df['next open'] = df['open'].shift(-1)
     df['next datetime'] = df['datetime'].shift(-1)
     df.reset_index(drop=True, inplace=True)
-    df['qty'] = df['qty'].astype(str).str.upper()
 
     last_id = df.index[-1]
     action_price_label = 'next open' if buy_at_open else 'close'
@@ -71,6 +92,7 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
 
     except Exception:
         print(f'Invalid fee mode {fee_mode}, using zero fees')
+
         def cal_fee(qty):
             return 0.0
 
@@ -82,21 +104,25 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
         if (id == last_id) and buy_at_open:
             continue
 
-        signal = row['signal'].upper()
         action_price = row[action_price_label]
         action_dt = row[action_datetime]
+
+        signal, input_qty = signal_func(row=row, cur_cash=cur_cash, cur_qty=cur_qty,action_price=action_price,action_dt=action_dt)
+        signal = signal.upper()
+        input_qty = str(input_qty).upper()
+
         if signal == 'PASS':
             continue
 
         elif signal == 'LONG' and cur_cash > 0:
             action_price = action_price * (1 + spread)
             max_qty = int(cur_cash / action_price)
-            bot_qty = max_qty if row['qty'] == 'ALL' else min(max_qty, abs(int(row['qty'])))
+            bot_qty = max_qty if input_qty == 'ALL' else min(max_qty, abs(int(input_qty)))
 
             cash_proceeds = -bot_qty * action_price
             txn_fee = cal_fee(bot_qty)
 
-            cur_cash = cur_cash + cash_proceeds  - txn_fee
+            cur_cash = cur_cash + cash_proceeds - txn_fee
             cur_qty += bot_qty
 
             trades.loc[action_dt] = ['BUY', action_price, bot_qty, cash_proceeds, txn_fee]
@@ -113,13 +139,16 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
             cur_qty = 0
             trades.loc[action_dt] = ['SELL', action_price, exit_qty, cash_proceeds, txn_fee]
 
-        elif signal == 'SHORT' and cur_qty <= 0:
+        elif signal == 'SHORT':
             action_price = action_price * (1 - spread)
 
             ev = cur_qty * action_price
             pv = cur_cash + ev
-            max_qty = int(pv / action_price) + cur_qty
-            short_qty = max_qty if row['qty'] == 'ALL' else min(abs(int(row['qty'])), max_qty)
+            min_short = -int(pv / action_price)
+            short_qty = abs(int(input_qty))
+            if cur_qty - short_qty < min_short:
+                short_qty = cur_qty - min_short
+
 
             cash_proceeds = short_qty * action_price
             txn_fee = cal_fee(short_qty)
@@ -143,7 +172,7 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
 
             pv = cur_qty * action_price + cur_cash
             max_qty = int(pv / action_price)
-            long_qty = max_qty if row['qty'] == 'ALL' else min(max_qty, int(row['qty']))
+            long_qty = max_qty if input_qty == 'ALL' else min(max_qty, int(input_qty))
             bot_qty = -1 * cur_qty + long_qty
 
             cash_proceeds = -action_price * bot_qty
@@ -158,7 +187,7 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
 
             pv = cur_qty * action_price + cur_cash
             max_qty = int(pv / action_price)
-            short_qty = max_qty if row['qty'] == 'ALL' else min(max_qty, int(row['qty']))
+            short_qty = max_qty if input_qty == 'ALL' else min(max_qty, int(input_qty))
             sell_qty = -short_qty - cur_qty
 
             cash_proceeds = - sell_qty * action_price
@@ -184,11 +213,10 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
             trd_side = 'SELL' if action_qty < 0 else 'BUY'
             trades.loc[action_dt] = [trd_side, action_price, abs(action_qty), cash_proceeds, txn_fee]
         else:
-            print(f'Invalid signal {signal} at {row["datetime"]}, passed without actions')
+            print(f'Invalid signal {signal} at {row["datetime"]} with qty {cur_qty}, passed without actions')
 
         if not buy_at_open:
             records.loc[row['datetime']] = [cur_cash, cur_qty]
-
 
     completed_df = df.copy()
     completed_df = completed_df.merge(records.reset_index(), on=['datetime'], how='right')
@@ -205,6 +233,7 @@ def backtest(df, capital, fee_mode: str='FIXED:0', buy_at_open=True, spread: flo
 
 if __name__ == '__main__':
     from examples import research_tools
+
     df = research_tools.download_data('K_DAY', 'HK.00700')
     df['sma16'] = df['close'].rolling(16).mean()
     df['sma32'] = df['close'].rolling(32).mean()
@@ -215,10 +244,14 @@ if __name__ == '__main__':
     for id, row in df.iterrows():
         if row['dif'] > 0 and row['pre_dif'] <= 0:
             signal.append('COVER AND LONG')
+
         elif row['dif'] < 0 and row['pre_dif'] >= 0:
             signal.append('EXIT AND SHORT')
         else:
             signal.append('PASS')
+
     df['signal'] = signal
-    df['qty'] = 'ALL'
-    backtest_result = backtest(df, capital=100000)
+    df['qty'] = "ALL"
+    backtest_result = backtest(df, capital=100000, signal_func=standard_specified_signal)
+
+
