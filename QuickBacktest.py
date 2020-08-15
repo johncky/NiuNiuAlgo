@@ -69,7 +69,7 @@ class BacktestResults:
         self.all_results[ticker].plot()
 
     def ticker_stats(self, ticker):
-        self.all_results[ticker].stats()
+        return self.all_results[ticker].stats()
 
     def stats(self):
         tk_stats = dict()
@@ -77,7 +77,7 @@ class BacktestResults:
             tk_stats[tk] = self.all_results[tk].stats()
         return np.round(pd.DataFrame(tk_stats), 2)
 
-    def portfolio_result(self, benchmark, allocations=None):
+    def portfolio_report(self, benchmark, allocations=None):
         import webbrowser
         portfolio_pv = self.make_portfolio(allocations=allocations)['pv']
         html = 'backtest result.html'
@@ -85,7 +85,7 @@ class BacktestResults:
         webbrowser.open(html)
 
     def make_portfolio(self, allocations=None):
-        df = pd.concat([x.result_df.set_index('datetime')['pv'] for x in self.all_results.values()])
+        df = pd.concat([x.result_df.set_index('datetime')['pv'] for x in self.all_results.values()], axis=1)
         df.columns = self.all_results.keys()
         df = df.fillna(method='bfill')
         allocations = [1 / len(self.all_results)] * len(self.all_results) if allocations is None else allocations
@@ -329,12 +329,13 @@ def backtest(tickers, strategy_func, init_capital=1000000, signal_mode='qty', bu
         if start_date:
             df = df.loc[df['datetime'] >= start_date]
         if end_date:
-            df = df.loc[df['datetime'] <= start_date]
+            df = df.loc[df['datetime'] <= end_date]
         df = create_signal(df=df, strategy_func=strategy_func, max_rows=max_rows, signal_mode=signal_mode)
         print(f'Backtesting {tk}...')
         backtest_result = run_backtest(df, capital=init_capital, buy_at_open=buy_at_open, bid_ask_spread=bid_ask_spread,
                                        fee_mode=fee_mode, signal_func=signal_func)
         backtest_result_dict[tk] = backtest_result
+    print('Completed!')
     return BacktestResults(backtest_results=backtest_result_dict)
 
 
@@ -385,4 +386,12 @@ if __name__ == '__main__':
             return 'PASS', ''
 
 
-    result = backtest(tickers=['0700.HK', '1299.HK'], strategy_func=sma_crossover_signal)
+    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX']
+    result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
+                      end_date="2020-07-31")
+
+    # if "allocations" is not specified, default equal weightings
+    # result.portfolio_report(benchmark="^IXIC")
+
+    # stats of all tickers
+    result.stats()
