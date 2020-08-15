@@ -391,7 +391,13 @@ if __name__ == '__main__':
                       end_date="2020-07-31")
 
     # if "allocations" is not specified, default equal weightings
-    # result.portfolio_report(benchmark="^IXIC")
+    result.portfolio_report(benchmark="^IXIC")
 
     # stats of all tickers
     result.stats()
+
+    # plot exit entry points of a ticker
+    result.ticker_plot('FB')
+
+    # report of a ticker
+    result.ticker_report('FB', benchmark='^IXIC')

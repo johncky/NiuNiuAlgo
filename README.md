@@ -164,28 +164,36 @@ give it a df with column datetime, open, close, signal, qty:</p>
 </p>
 
 ```python
-    # df with column datetime, open, close, qty, signal
-    df['sma16'] = df['close'].rolling(16).mean()
-    df['sma32'] = df['close'].rolling(32).mean()
-    df['dif'] = df['sma16'] - df['sma32']
-    df['pre_dif'] = df['dif'].shift(1)
-    df = df.dropna()
-    signal = list()
-    for id, row in df.iterrows():
+     def sma_crossover_signal(df):
+        df['sma16'] = df['adjclose'].rolling(16).mean()
+        df['sma32'] = df['adjclose'].rolling(32).mean()
+        df['dif'] = df['sma16'] - df['sma32']
+        df['pre_dif'] = df['dif'].shift(1)
+        row = df.iloc[-1]
         if row['dif'] > 0 and row['pre_dif'] <= 0:
-            signal.append('COVER AND LONG')
-        elif row['dif'] < 0 and row['pre_dif'] >= 0:
-            signal.append('EXIT AND SHORT')
-        else:
-            signal.append('PASS')
-    # trading signal
-    df['signal'] = signal
-    # always all-in, used all the cash, or buying power (equal to portfolio value: equity value + cash)
-    df['qty'] = 'ALL'
-    
-    # buy at next open when signal is received, with spread 0.2%, fixed fee of 16 HKD
-    backtest_result = backtest(df, capital=100000, buy_at_open=True, spread=0.2/100, fee_mode='FIXED:16')
+            return 'COVER AND LONG', 'ALL'
 
+        elif row['dif'] < 0 and row['pre_dif'] >= 0:
+            return 'EXIT AND SHORT', 'ALL'
+        else:
+            return 'PASS', ''
+
+
+    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX']
+    result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
+                      end_date="2020-07-31")
+                      
+    # if "allocations" is not specified, default equal weightings
+    result.portfolio_report(benchmark="^IXIC")
+
+    # stats of all tickers
+    result.stats()
+    
+    # plot exit entry points of a ticker
+    result.ticker_plot('FB')
+    
+    # report of a ticker
+    result.ticker_report('FB', benchmark='^IXIC')
 ```
 
 <h3> Backtesting report </h3>
