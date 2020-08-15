@@ -162,6 +162,12 @@ give it a df with column datetime, open, close, signal, qty:</p>
 <p>
 'qty' column: quantity value (float or int) to trade, or "ALL"
 </p>
+<p>
+'%' column: adjust % of portfolio value invested in stock to target
+</p>
+<p>
+you can self-defined signal type to replace 'qty' or '%'. 
+</p>
 
 ```python
      def sma_crossover_signal(df):
