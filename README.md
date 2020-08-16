@@ -170,25 +170,25 @@ you can self-defined signal type to replace 'qty' or '%'.
 </p>
 
 ```python
-     def sma_crossover_signal(df):
+
+    def sma_crossover_signal(df, states):
         df['sma16'] = df['adjclose'].rolling(16).mean()
         df['sma32'] = df['adjclose'].rolling(32).mean()
         df['dif'] = df['sma16'] - df['sma32']
         df['pre_dif'] = df['dif'].shift(1)
         row = df.iloc[-1]
         if row['dif'] > 0 and row['pre_dif'] <= 0:
-            return 'COVER AND LONG', 'ALL'
+            return 'LONG', 'ALL'
 
         elif row['dif'] < 0 and row['pre_dif'] >= 0:
-            return 'EXIT AND SHORT', 'ALL'
+            return 'EXIT LONG', 'ALL'
         else:
             return 'PASS', ''
 
-
-    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX']
+    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
     result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
-                      end_date="2020-07-31")
-                      
+                      end_date="2020-07-31", states={'any variable you wanna preserve': 0})
+
     # if "allocations" is not specified, default equal weightings
     result.portfolio_report(benchmark="^IXIC")
 

@@ -2,6 +2,21 @@ import pandas as pd
 import numpy as np
 import quantstats as qs
 
+# def create_signal(df, strategy_func, states, signal_mode='qty', max_rows=None):
+#     df = df.copy()
+#     signal_list = list()
+#     value_list = list()
+#     max_rows = df.shape[0] if max_rows is None else max_rows
+#     states = states
+#     for i in range(0, df.shape[0]):
+#         partial_df = df.iloc[:i + 1].iloc[-max_rows:]
+#         signal, value = strategy_func(df=partial_df, states=states)
+#         signal_list.append(signal)
+#         value_list.append(value)
+#     df['signal'] = signal_list
+#     df[signal_mode] = value_list
+#     return df
+
 
 class BacktestResult:
     def __init__(self, result_df, trade_df):
@@ -92,24 +107,20 @@ class BacktestResults:
         return pd.DataFrame({'datetime': df.index, 'pv': np.dot(df, allocations)}).set_index('datetime')
 
 
-def standard_specified_signal(row, cur_cash, cur_qty, action_price, action_dt):
-    return row['signal'].upper(), row['qty']
-
-
-def percent_invested_signal(row, cur_cash, cur_qty, action_price, action_dt):
-    if row['%'] == '':
+def convert_percent_to_qty(signal, value, cur_cash, cur_qty, trade_price, trade_date):
+    if value == '':
         return "PASS", 0
-    ev = cur_qty * action_price
+    ev = cur_qty * trade_price
     pv = cur_cash + ev
     try:
-        percent = float(row['%'])
+        percent = float(value)
         if percent > 1 or percent < -1:
             raise Exception()
     except Exception:
-        print(f'Invalid % invested {row["%"]}, return PASS signal')
+        print(f'Invalid % invested {value}, return PASS signal')
         return "PASS", 0
 
-    required_qty = int(pv * percent / action_price)
+    required_qty = int(pv * percent / trade_price)
     action_qty = required_qty - cur_qty
     if action_qty == 0:
         return "PASS", 0
@@ -119,12 +130,7 @@ def percent_invested_signal(row, cur_cash, cur_qty, action_price, action_dt):
         return "SHORT", abs(action_qty)
 
 
-def run_backtest(df, capital, buy_at_open=True, bid_ask_spread: float = 0.0, fee_mode: str = 'FIXED:0',
-                 signal_func=standard_specified_signal):
-    # Very quick backtesting function, give it a df that contains columns: datetime, open, close, signal, qty
-    # signal column: 'PASS, LONG, EXIT LONG, SHORT, COVER SHORT, COVER AND LONG, EXIT AND SHORT, LIQUIDATE'
-    # qty: quantity value (float or int) to trade, or "ALL"
-    # fee_mode: str: FIXED:FLOAT or QTY:FLOAT
+def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_spread: float = 0.0, fee_mode: str='FIXED:0'):
 
     records = pd.DataFrame(columns=['cash', 'quantity'])
     records.index.name = 'datetime'
@@ -165,7 +171,6 @@ def run_backtest(df, capital, buy_at_open=True, bid_ask_spread: float = 0.0, fee
             return 0.0
 
     for id, row in df.iterrows():
-
         if buy_at_open:
             records.loc[row['datetime']] = [cur_cash, cur_qty]
 
@@ -175,8 +180,14 @@ def run_backtest(df, capital, buy_at_open=True, bid_ask_spread: float = 0.0, fee
         action_price = row[action_price_label]
         action_dt = row[action_datetime]
 
-        signal, input_qty = signal_func(row=row, cur_cash=cur_cash, cur_qty=cur_qty, action_price=action_price,
-                                        action_dt=action_dt)
+        states['cash'] = cur_cash
+        states['qty'] = cur_qty
+        states['trade price'] = action_price
+        states['trade date'] = action_dt
+
+        partial_df = df.iloc[:id + 1].copy()
+        signal, input_qty = strategy_func(df=partial_df, states=states)
+
         signal = signal.upper()
         input_qty = str(input_qty).upper()
 
@@ -298,29 +309,13 @@ def run_backtest(df, capital, buy_at_open=True, bid_ask_spread: float = 0.0, fee
     return BacktestResult(result_df=completed_df, trade_df=trades)
 
 
-def create_signal(df, strategy_func, signal_mode='qty', max_rows=None):
-    df = df.copy()
-    signal_list = list()
-    value_list = list()
-    max_rows = df.shape[0] if max_rows is None else max_rows
-    for i in range(0, df.shape[0]):
-        partial_df = df.iloc[:i + 1].iloc[-max_rows:]
-        signal, value = strategy_func(partial_df)
-        signal_list.append(signal)
-        value_list.append(value)
-    df['signal'] = signal_list
-    df[signal_mode] = value_list
-    return df
-
-
-def backtest(tickers, strategy_func, init_capital=1000000, signal_mode='qty', buy_at_open=True,
+def backtest(tickers, strategy_func, init_capital=1000000, buy_at_open=True,
              bid_ask_spread: float = 0.0,
-             fee_mode: str = 'FIXED:0', signal_func=standard_specified_signal, start_date=None, end_date=None,
-             max_rows=None):
+             fee_mode: str = 'FIXED:0', start_date=None, end_date=None,
+             max_rows=None, states: dict=None):
     backtest_result_dict = dict()
     print('Downloading data from Yahoo...')
     dfs = yh.Stocks(tickers).prices()
-
     for tk in tickers:
         if tk not in dfs.keys():
             print(f'Pass backtesting of {tk}...')
@@ -330,10 +325,14 @@ def backtest(tickers, strategy_func, init_capital=1000000, signal_mode='qty', bu
             df = df.loc[df['datetime'] >= start_date]
         if end_date:
             df = df.loc[df['datetime'] <= end_date]
-        df = create_signal(df=df, strategy_func=strategy_func, max_rows=max_rows, signal_mode=signal_mode)
+
+        states_copy = dict() if states is None else states.copy()
+
+        # df = create_signal(df=df, strategy_func=strategy_func, max_rows=max_rows, signal_mode=signal_mode, states=states_copy)
         print(f'Backtesting {tk}...')
-        backtest_result = run_backtest(df, capital=init_capital, buy_at_open=buy_at_open, bid_ask_spread=bid_ask_spread,
-                                       fee_mode=fee_mode, signal_func=signal_func)
+        backtest_result = run_backtest(df, strategy_func=strategy_func, states=states_copy,
+                                       capital=init_capital, buy_at_open=buy_at_open, bid_ask_spread=bid_ask_spread,
+                                       fee_mode=fee_mode)
         backtest_result_dict[tk] = backtest_result
     print('Completed!')
     return BacktestResults(backtest_results=backtest_result_dict)
@@ -371,33 +370,47 @@ if __name__ == '__main__':
     # df = create_signal(df=df, strategy_func=sma_crossover_signal, max_rows=33)
     # backtest_result2 = run_backtest(df, capital=100000, buy_at_open=False)
 
-    def sma_crossover_signal(df):
+    # def sma_crossover_signal(df):
+    #     df['sma16'] = df['adjclose'].rolling(16).mean()
+    #     df['sma32'] = df['adjclose'].rolling(32).mean()
+    #     df['dif'] = df['sma16'] - df['sma32']
+    #     df['pre_dif'] = df['dif'].shift(1)
+    #     row = df.iloc[-1]
+    #     if row['dif'] > 0 and row['pre_dif'] <= 0:
+    #         return 'LONG', 'ALL'
+    #
+    #     elif row['dif'] < 0 and row['pre_dif'] >= 0:
+    #         return 'EXIT LONG', 'ALL'
+    #     else:
+    #         return 'PASS', ''
+
+
+    def sma_crossover_signal(df, states):
         df['sma16'] = df['adjclose'].rolling(16).mean()
         df['sma32'] = df['adjclose'].rolling(32).mean()
         df['dif'] = df['sma16'] - df['sma32']
         df['pre_dif'] = df['dif'].shift(1)
         row = df.iloc[-1]
         if row['dif'] > 0 and row['pre_dif'] <= 0:
-            return 'COVER AND LONG', 'ALL'
+            return 'LONG', 'ALL'
 
         elif row['dif'] < 0 and row['pre_dif'] >= 0:
-            return 'EXIT AND SHORT', 'ALL'
+            return 'EXIT LONG', 'ALL'
         else:
             return 'PASS', ''
 
-
-    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX']
+    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
     result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
-                      end_date="2020-07-31")
+                      end_date="2020-07-31", states={'any variable you wanna preserve': 0})
 
     # if "allocations" is not specified, default equal weightings
     result.portfolio_report(benchmark="^IXIC")
 
-    # stats of all tickers
-    result.stats()
-
-    # plot exit entry points of a ticker
-    result.ticker_plot('FB')
-
-    # report of a ticker
-    result.ticker_report('FB', benchmark='^IXIC')
+    # # stats of all tickers
+    # result.stats()
+    #
+    # # plot exit entry points of a ticker
+    # result.ticker_plot('FB')
+    #
+    # # report of a ticker
+    # result.ticker_report('FB', benchmark='^IXIC')
