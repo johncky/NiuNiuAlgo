@@ -106,31 +106,8 @@ class BacktestResults:
         allocations = [1 / len(self.all_results)] * len(self.all_results) if allocations is None else allocations
         return pd.DataFrame({'datetime': df.index, 'pv': np.dot(df, allocations)}).set_index('datetime')
 
-
-def convert_percent_to_qty(signal, value, cur_cash, cur_qty, trade_price, trade_date):
-    if value == '':
-        return "PASS", 0
-    ev = cur_qty * trade_price
-    pv = cur_cash + ev
-    try:
-        percent = float(value)
-        if percent > 1 or percent < -1:
-            raise Exception()
-    except Exception:
-        print(f'Invalid % invested {value}, return PASS signal')
-        return "PASS", 0
-
-    required_qty = int(pv * percent / trade_price)
-    action_qty = required_qty - cur_qty
-    if action_qty == 0:
-        return "PASS", 0
-    if action_qty > 0:
-        return "LONG", action_qty
-    else:
-        return "SHORT", abs(action_qty)
-
-
-def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_spread: float = 0.0, fee_mode: str='FIXED:0'):
+def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_spread: float = 0.0,
+                 fee_mode: str='FIXED:0', max_rows = None):
 
     records = pd.DataFrame(columns=['cash', 'quantity'])
     records.index.name = 'datetime'
@@ -170,6 +147,7 @@ def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_s
         def cal_fee(qty, price):
             return 0.0
 
+    max_rows = df.shape[0] if max_rows is None else max_rows
     for id, row in df.iterrows():
         if buy_at_open:
             records.loc[row['datetime']] = [cur_cash, cur_qty]
@@ -181,11 +159,11 @@ def run_backtest(df, strategy_func, capital, states, buy_at_open=True, bid_ask_s
         action_dt = row[action_datetime]
 
         states['cash'] = cur_cash
-        states['qty'] = cur_qty
+        states['quantity'] = cur_qty
         states['trade price'] = action_price
         states['trade date'] = action_dt
 
-        partial_df = df.iloc[:id + 1].copy()
+        partial_df = df.iloc[:id + 1].iloc[-max_rows:].copy()
         signal, input_qty = strategy_func(df=partial_df, states=states)
 
         signal = signal.upper()
@@ -337,6 +315,27 @@ def backtest(tickers, strategy_func, init_capital=1000000, buy_at_open=True,
     print('Completed!')
     return BacktestResults(backtest_results=backtest_result_dict)
 
+def convert_percent_to_qty(percentage, cur_cash, cur_qty, trade_price):
+    if percentage == '':
+        return "PASS", 0
+    ev = cur_qty * trade_price
+    pv = cur_cash + ev
+    try:
+        percent = float(percentage)
+        if percent > 1 or percent < -1:
+            raise Exception()
+    except Exception:
+        print(f'Invalid % invested {percentage}, return PASS signal')
+        return "PASS", 0
+
+    required_qty = int(pv * percent / trade_price)
+    action_qty = required_qty - cur_qty
+    if action_qty == 0:
+        return "PASS", 0
+    if action_qty > 0:
+        return "LONG", action_qty
+    else:
+        return "SHORT", abs(action_qty)
 
 if __name__ == '__main__':
     import Yahoo as yh
@@ -384,6 +383,7 @@ if __name__ == '__main__':
     #     else:
     #         return 'PASS', ''
 
+    import random
 
     def sma_crossover_signal(df, states):
         df['sma16'] = df['adjclose'].rolling(16).mean()
@@ -391,6 +391,7 @@ if __name__ == '__main__':
         df['dif'] = df['sma16'] - df['sma32']
         df['pre_dif'] = df['dif'].shift(1)
         row = df.iloc[-1]
+        print(states['cash'])
         if row['dif'] > 0 and row['pre_dif'] <= 0:
             return 'LONG', 'ALL'
 
@@ -401,7 +402,7 @@ if __name__ == '__main__':
 
     tickers = ['FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM']
     result = backtest(tickers=tickers, strategy_func=sma_crossover_signal, start_date="2015-01-01",
-                      end_date="2020-07-31", states={'any variable you wanna preserve': 0})
+                      end_date="2020-07-31", states={'id': 0})
 
     # if "allocations" is not specified, default equal weightings
     result.portfolio_report(benchmark="^IXIC")
