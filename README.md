@@ -98,35 +98,39 @@ class SMACrossover(CandlestickStrategy):
 Quick back-test in research stage: [QuickBacktest](http://www.github.com/johncky/QuickBacktest)
 
 ```python
-    import quickBacktest
+    from quickBacktest import Strategy
     
-    def sma_crossover(df, states):
-        df['sma16'] = df['adjclose'].rolling(16).mean()
-        df['sma32'] = df['adjclose'].rolling(32).mean()
-        df['dif'] = df['sma16'] - df['sma32']
-        df['pre_dif'] = df['dif'].shift(1)
-        row = df.iloc[-1]
-        if row['dif'] > 0 and row['pre_dif'] <= 0:
-            return 'COVER AND LONG', 'ALL'
+    # states are preserved in loop
+    # put your variables/objects inside states
+    # cash, quantity, trade price, trade date are preserved names in states
+    # cash: current cash; quantity: current quantity; 
+    class SMA(Strategy):
+        def init(self):
+            self.data['sma16'] = self.data['adjclose'].rolling(16).mean()
+            self.data['sma32'] = self.data['adjclose'].rolling(32).mean()
+            self.data['dif'] = self.data['sma16'] - self.data['sma32']
+            self.data['pre_dif'] = self.data['dif'].shift(1)
 
-        elif row['dif'] < 0 and row['pre_dif'] >= 0:
-            return 'EXIT AND SHORT', 'ALL'
-        else:
-            return 'PASS', ''
+        def signal(self):
+            if self.dif > 0 and self.pre_dif <= 0:
+                self.long()
 
-    # tickers to backtest
-    tickers = ['FB', 'AMZN', 'AAPL', 'GOOG']
+            elif self.dif < 0 and self.pre_dif >= 0:
+                self.exit_long()
+            else:
+                pass
 
-    result = quickBacktest.backtest(tickers=tickers,
-                        capital=1000000,
-                        strategy_func=sma_crossover, 
-                        start_date="2015-01-01",
-                        end_date="2020-07-31",
-                        states={'var1': 0, 'var2': list()}, 
-                        buy_at_open=True,
-                        bid_ask_spread= 0.0,
-                        fee_mode= 'FIXED:0',
-                        max_rows=None)
+
+    sma = SMA()
+    result = sma.backtest(tickers=tickers,
+                           capital=1000000,
+                           start_date="2015-01-01",
+                           end_date="2020-07-31",
+                           buy_at_open=True,
+                           bid_ask_spread=0.0,
+                           fee_mode='FIXED:0',
+                           data_params={'interval': '1d', 'range': '10y'})
+                      
 ```
 
 ### Backtesting report
