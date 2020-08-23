@@ -12,10 +12,10 @@ class LevelFilter(object):
 
 
 class RootLogger:
-    def __init__(self, root_name, level=logging.DEBUG):
+    def __init__(self, root_name, file_path, level=logging.DEBUG):
         self.root = logging.getLogger()
         # self.file_path = '../logs/{}/'.format(root_name)
-        self.file_path = '{}/'.format(root_name)
+        self.file_path = f'{file_path}/{root_name}/'
 
         if not os.path.exists(self.file_path):
             os.mkdir(self.file_path)

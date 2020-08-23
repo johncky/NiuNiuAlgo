@@ -8,7 +8,7 @@ import zmq.asyncio
 import pickle
 import aiomysql
 import numpy as np
-import Logger
+from FutuAlgo import Logger
 import collections
 
 d_types = ('K_DAY', 'K_1M', 'K_3M', 'K_5M', 'K_15M', 'QUOTE', 'ORDER_UPDATE')
@@ -101,7 +101,7 @@ class FutuOrderUpdateHandler(TradeOrderHandlerBase):
 
 
 class FutuHook():
-    def __init__(self, db_save_freq=30 * 60):
+    def __init__(self, log_path='.', db_save_freq=30 * 60):
         # Get Environment Variables
         self.SANIC_HOST = os.getenv('SANIC_HOST')
         self.SANIC_PORT = os.getenv('SANIC_PORT')
@@ -133,12 +133,11 @@ class FutuHook():
         self.quote_context.set_handler(FutuKlineHandler(queue=self.queue))
 
         # Logger
-        self.logger = Logger.RootLogger('FutuHook')
-        self.logger.debug(f'FutuHook trade unlock status {self.unlock_trade()}')
+        self.logger = Logger.RootLogger('FutuHook', file_path=log_path)
+        self.logger.debug(f'{self.unlock_trade()}')
 
         # Create a dictionary for storing temporary dfs, which will be saved to MySQL later
         self.tmp_storage = collections.defaultdict(lambda: pd.DataFrame())
-
         self._db_save_freq = db_save_freq
         self._db_last_saved = time.time()
 
@@ -174,7 +173,7 @@ class FutuHook():
 
         if RET_ERROR in (ret_code_hk, ret_code_cn, ret_code_us):
             raise Exception("FutuHook: Trade Unlocked Failed")
-        return f'HK:{ret_code_hk}   US:{ret_code_us}   CN:{ret_code_cn}'
+        return f'Trade unlocks successfully! '
 
     def query_subscriptions(self):
         ret_code, sub = self.quote_context.query_subscription()
@@ -191,7 +190,7 @@ class FutuHook():
                     datatype = topic.split('.')[1]
                     self.tmp_storage[datatype] = self.tmp_storage[datatype].append(df)
                     await self.mq_socket.send_multipart([bytes(topic, 'utf-8'), pickle.dumps(df)])
-                    print(topic)
+                    print(f'Published data : {topic}')
                     self.queue.task_done()
 
             if (time.time() - self._db_last_saved) > self._db_save_freq:
@@ -212,7 +211,7 @@ class FutuHook():
             if msg == 'Ping':
                 await self.hello_socket.send_string('Pong')
 
-    def run(self):
+    def run(self, fill_db=False):
         # asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
         loop = asyncio.get_event_loop()
 
@@ -225,6 +224,10 @@ class FutuHook():
             tasks.append(self.publish())
             tasks.append(self.ping_pong())
             await self.db_create_schemas()
+            if fill_db:
+                subscriptions = self.query_subscriptions()[1]
+                fill_db_result = await self.fill_db(tickers=tuple(subscriptions.values())[0], datatypes=subscriptions.keys())
+                self.logger.info(f'Fill DB status: {fill_db_result}')
             await asyncio.gather(*tasks)
         self._running = True
         loop.create_task(_run())
@@ -241,14 +244,14 @@ class FutuHook():
                     await cursor.execute(schemas_sql['K'].format(self.MYSQL_DB, dtype))
                     await conn.commit()
                 except Exception as e:
-                    self.logger.error('SqlManager: failed to create table for {}, reason: {}'.format(dtype, e))
+                    self.logger.error(f'MySQL: failed to create table {dtype} due to {str(e)}')
 
             elif (dtype == 'ORDER_UPDATE') or (dtype == 'QUOTE'):
                 try:
                     await cursor.execute(schemas_sql[dtype].format(self.MYSQL_DB))
                     await conn.commit()
                 except Exception as e:
-                    self.logger.error('SqlManager: failed to create table for {}, reason: {}'.format(dtype, e))
+                    self.logger.error(f'MySQL: failed to create table {dtype}, reason: {str(e)}')
 
         conn.close()
 
@@ -267,7 +270,7 @@ class FutuHook():
 
         else:
             return
-        self.logger.debug('SqlManager: inserting data {} into Mysql'.format(str(datatype)))
+        self.logger.debug(f'MySQL: inserting data {datatype}')
         return await self.insert_df(db=self.MYSQL_DB, table=table, pk_positions=pk_positions, df=df)
 
     async def insert_df(self, db, table, pk_positions, df):
@@ -289,17 +292,8 @@ class FutuHook():
                 column_name_ok = column_name_ok.rstrip(',')
 
                 df = df.applymap(str)
-                # df.replace({'\\': '\\\\'}, regex=True, inplace=True)
                 df.replace({'\'': '\\\''}, regex=True, inplace=True)
                 temp = df.values.tolist()
-                # for row in df.iterrows():
-                #     index, data = row
-                #     try:
-                #         data = data.str.replace('\\', '\\\\')
-                #         data = data.str.replace('\'', '\\\'')
-                #     except AttributeError:
-                #         pass
-                #     temp.append(data.tolist())
                 value_ok = str()
                 for i in temp:
                     for iikey, iivalue in enumerate(i):
@@ -324,13 +318,13 @@ class FutuHook():
                 await conn.commit()
             return 1, ''
         except Exception as e:
-            self.logger.error('SqlManager: exception occur during insert, reason: {}'.format(e))
+            self.logger.error(f'MySQL: failed to insert data due to {str(e)}')
             return 0, str(e)
         finally:
             conn.close()
 
-    async def db_get_historicals(self, datatype, ticker, start_date: str, end_date: str):
-        end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d') if end_date is None else end_date
+    async def db_get_historicals(self, datatype, ticker, start_date: str, end_date: str = None):
+        # end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d') if end_date is None else end_date
 
         sql = f"""SELECT * FROM {self.MYSQL_DB}.FUTU_{datatype} where ticker = '{ticker}'"""
         if start_date or end_date:
@@ -341,7 +335,7 @@ class FutuHook():
                 if start_date is not None:
                     sql += f"datetime >= '{start_date}'"
                 else:
-                    sql += f"datetime < '{end_date}'"
+                    sql += f"datetime <= '{end_date}'"
 
         conn = await self.db_get_conn()
         cur = await conn.cursor()
@@ -361,7 +355,7 @@ class FutuHook():
                                           db=str(self.MYSQL_DB),
                                           charset='utf8mb4')
         except Exception as e:
-            self.logger.error('SqlManager: failed to get conn, reason: {}'.format(e))
+            self.logger.error(f'MySQL: failed to get conn due to {str(e)}')
 
     # -----------------------------[ Sanic ] -------------------------------------------
 
@@ -400,35 +394,33 @@ class FutuHook():
             return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     # GET: datatype, ticker, start_date, end_date, from_exchange
-    async def download_historicals(self, request):
-        try:
-            datatype = request.args.get('datatype')
-            assert datatype in d_types, 'Invalid data type'
-            ticker = request.args.get('ticker')
-            start_date = request.args.get('start_date')
-            end_date = request.args.get('end_date')
-
-            df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
-                                               end_date=end_date)
-            if self.tmp_storage[datatype].shape[0] != 0:
-                df = df.append(
-                    self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
-            if df.shape[0] != 0:
-                df['datetime'] = pd.to_datetime(df['datetime'])
-                df = df.drop_duplicates(
-                    subset=['datetime', 'ticker'], keep='last').sort_values(by='datetime', axis=0)
-
-            output_locations = './outputs/{}_{}.csv'.format(datatype, ticker)
-            df.to_csv(output_locations)
-            return response.json({'ret_code': 1, 'return': {'content': output_locations}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+    # async def download_historicals(self, request):
+    #     try:
+    #         datatype = request.args.get('datatype')
+    #         ticker = request.args.get('ticker')
+    #         start_date = request.args.get('start_date')
+    #         end_date = request.args.get('end_date')
+    #
+    #         df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
+    #                                            end_date=end_date)
+    #         if self.tmp_storage[datatype].shape[0] != 0:
+    #             df = df.append(
+    #                 self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
+    #         if df.shape[0] != 0:
+    #             df['datetime'] = pd.to_datetime(df['datetime'])
+    #             df = df.drop_duplicates(
+    #                 subset=['datetime', 'ticker'], keep='last').sort_values(by='datetime', axis=0)
+    #         output_locations = './outputs/{}_{}.csv'.format(datatype, ticker)
+    #         df.to_csv(output_locations)
+    #         return response.json({'ret_code': 1, 'return': {'content': output_locations}})
+    #     except Exception as e:
+    #         return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     # GET: datatype, ticker, start_date, end_date, from_exchange
     async def get_historicals(self, request):
         try:
             datatype = request.args.get('datatype')
-            assert datatype in d_types, 'Invalid data type'
+            assert datatype in d_types, f"Invalid data type {datatype}"
             from_exchange = True if request.args.get('from_exchange').upper() == 'TRUE' else False
             ticker = request.args.get('ticker')
             start_date = request.args.get('start_date')
@@ -466,7 +458,7 @@ class FutuHook():
     async def db_get_last_update_time(self, request):
         try:
             datatype = request.args.get('datatype').upper()
-            assert datatype in d_types, 'Invalid data type'
+            assert datatype in d_types, f"Invalid data type {datatype}"
             sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(self.MYSQL_DB, datatype)
             conn = await self.db_get_conn()
             cur = await conn.cursor()
@@ -491,12 +483,12 @@ class FutuHook():
             trade_side = str(request.form.get('trade_side')).upper()
             ticker = request.form.get('ticker')
             market = ticker.split('.')[0]
-            assert market in ('HK', 'US', 'CN'), "Invalid market '{}'".format(market)
+            assert market in ('HK', 'US', 'CN'), f"Invalid market '{market}'"
             order_type = str(request.form.get('order_type')).upper()
-            assert order_type in ('ABSOLUTE_LIMIT', 'MARKET', 'NORMAL'), "Invalid order type '{}'".format(order_type)
-            assert trade_side in ('BUY', 'SELL', 'BUY_BACK', 'SELL_SHORT'), "Invalid trade side '{}'".format(trade_side)
+            assert order_type in ('ABSOLUTE_LIMIT', 'MARKET', 'NORMAL'), f"Invalid order type '{order_type}'"
+            assert trade_side in ('BUY', 'SELL', 'BUY_BACK', 'SELL_SHORT'), f"Invalid trade side '{trade_side}'"
             trade_environment = str(request.form.get('trade_environment')).upper()
-            assert trade_environment in ('REAL', 'SIMULATE',), "Invalid trade environment '{}'".format(trade_environment)
+            assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
             assert ticker is not None, "ticker cannot be empty"
             ticker = str(ticker).upper()
             quantity = request.form.get('quantity')
@@ -521,12 +513,11 @@ class FutuHook():
                 order_id = df['order_id'].iloc[0]
                 df = df.rename(columns={'code': 'ticker'})
                 self.logger.info(
-                    'ORDER: Placed order to buy {} shares of {} @ {}, order_id: {}'.format(quantity, ticker, price,
-                                                                                           order_id))
+                    f'ORDER: Placed order to buy {quantity} shares of {ticker} @ {price}, order_id: {order_id}')
                 return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
             else:
                 self.logger.info(
-                    'ORDER: Failed to buy {} shares of {} @ {}, reason: {}'.format(quantity, ticker, price, df))
+                    f'ORDER: Failed to buy {quantity} shares of {ticker} @ {price}, reason: {df}')
                 return response.json({'ret_code': 0, 'return': {'content': df}})
         except Exception as e:
             return response.json({'ret_code': 0, 'return': {'content': str(e)}})
@@ -538,11 +529,10 @@ class FutuHook():
             assert order_id is not None, 'order_id cannot be empty'
 
             action = str(request.form.get('action')).upper()
-            assert action in ('NORMAL', 'CANCEL', 'DISABLE', 'ENABLE', 'DELETE'), "Invalid action '{}'".format(action)
+            assert action in ('NORMAL', 'CANCEL', 'DISABLE', 'ENABLE', 'DELETE'), f"Invalid action '{action}'"
 
             trade_environment = str(request.form.get('trade_environment')).upper()
-            assert trade_environment in ('REAL', 'SIMULATE',), "Invalid trade environment '{}'".format(
-                trade_environment)
+            assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
 
             ticker = request.form.get('ticker')
             market = ticker.split('.')[0]
@@ -582,32 +572,47 @@ class FutuHook():
         request.form['action'] = ['CANCEL']
         return await self.modify_order(request)
 
+    async def fill_db(self, tickers, datatypes, start_date=None, end_date=None):
+        status = collections.defaultdict(lambda: list())
+        for dtype in datatypes:
+            for tk in tickers:
+                try:
+                    ret = self.quote_context.request_history_kline(code=tk, ktype=dtype,
+                                                                   start=start_date,
+                                                                   end=end_date, max_count=None)
+                    ret_code = ret[0]
+                    df = ret[1]
+                    if ret_code == -1:
+                        raise Exception(df)
+                    else:
+                        df = df[['code', 'time_key', 'open', 'high', 'low', 'close', 'volume', 'turnover']].rename(
+                            columns={'time_key': 'datetime', 'code': 'ticker'})
+                        ret_code, msg = await self.insert_data(datatype=dtype, df=df)
+                        if not ret_code:
+                            raise Exception(msg)
+                        status['Success'].append(f'{dtype}.{tk}')
+                except Exception as e:
+                    msg = f'Failed to download data {dtype}.{tk} due to {str(e)}'
+                    self.logger.error(msg)
+                    status['Fail'].append(msg)
+        return status
+
     # POST: ticker, datatype, start_date
     async def db_fill_data(self, request):
         try:
             ticker = request.form.get('ticker').upper()
             assert ticker is not None, "ticker cannot be empty"
             datatype = request.form.get('datatype').upper()
-            assert datatype in d_types, "Invalid data type"
+            assert datatype in d_types, f"Invalid data type {datatype}"
             start_date = request.form.get('start_date')
             end_date = request.form.get('end_date')
-            end_date = datetime.today().strftime('%Y-%m-%d') if end_date is None else end_date
 
-            ret = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
-                                                           start=start_date,
-                                                           end=end_date, max_count=None)
-            ret_code = ret[0]
-            df = ret[1]
-            if ret_code == -1:
-                raise Exception(df)
+            result_status = self.fill_db(tickers=[ticker], datatypes=[datatype], start_date=start_date,end_date=end_date)
+
+            if len(result_status['Success']) > 0:
+                return response.json({'ret_code': 1, 'return': {'content': 'Successful'}})
             else:
-                df = df[['code', 'time_key', 'open', 'high', 'low', 'close', 'volume', 'turnover']].rename(
-                    columns={'time_key': 'datetime', 'code': 'ticker'})
-                ret_code, msg = await self.insert_data(datatype=datatype, df=df)
-                if ret_code:
-                    return response.json({'ret_code': 1, 'return': {'content': 'Successful'}})
-                else:
-                    return response.json({'ret_code': 0, 'return': {'content': 'DB Insertion failed: {}'.format(msg)}})
+                return response.json({'ret_code': 0, 'return': {'content': f'{result_status["Fail"][0]}'}})
         except Exception as e:
             return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
@@ -618,8 +623,9 @@ class FutuHook():
             assert tickers is not None, 'tickers cannot be empty'
             if ('[' in tickers) and (']' in tickers):
                 tickers = eval(tickers)
-            else:
-                raise Exception('tickers should be a list')
+            if isinstance(tickers, str):
+                tickers = [tickers]
+            # same market type
             ret_code, data = self.quote_context.get_stock_basicinfo(market=tickers[0].upper().split('.')[0],
                                                                     code_list=tickers)
             if ret_code == 0:
@@ -635,7 +641,7 @@ class FutuHook():
         app.add_route(self.get_subscriptions, '/subscriptions', methods=['GET'])
         app.add_route(self.set_subscriptions, '/subscriptions', methods=['POST'])
         app.add_route(self.get_historicals, '/historicals', methods=['GET'])
-        app.add_route(self.download_historicals, '/download', methods=['GET'])
+        # app.add_route(self.download_historicals, '/download', methods=['GET'])
         app.add_route(self.db_get_last_update_time, '/db/last_update', methods=['GET'])
         app.add_route(self.place_order, '/order/place', methods=['POST'])
         app.add_route(self.modify_order, '/order/modify', methods=['POST'])
@@ -646,8 +652,8 @@ class FutuHook():
 
 if __name__ == '__main__':
     # Start FutuHook
-    INIT_DATATYPE = ['K_3M', 'K_5M', 'QUOTE']
-    INIT_TICKERS = ['HK.00700', 'HK.09988', 'HK.09999', 'HK.02318', 'HK.02800']
+    INIT_DATATYPE = ['K_DAY']
+    INIT_TICKERS = ['HK.00700', 'HK.09988', 'HK.09999', 'HK.02318', 'HK.02800', 'HK.01211']
     futu_hook = FutuHook()
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)
     futu_hook.run()

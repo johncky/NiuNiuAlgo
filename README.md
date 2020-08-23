@@ -1,6 +1,7 @@
 # FutuHook
 Algorithmic trading system for algo trading on FutuNiuNiu broker (project is not finished)</p>
- 
+<a href="https://github.com/johncky/FutuAlgo/blob/master/docs/System.png">How it works</a>
+
 ## FutuHook
 1. Maintain Connection to Futu OpenD, stream and broadcast real-time data 
 2. Store streamed data to MySQL databases</li>
@@ -28,7 +29,7 @@ Algorithmic trading system for algo trading on FutuNiuNiu broker (project is not
     futu_hook = FutuHook()
     # Subscribe to datatypes and tickers
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)
-    futu_hook.run()
+    futu_hook.run(fill_db=True)
 ```    
 
 ## Algo
@@ -156,7 +157,6 @@ class SMACrossover(Backtest):
     async def on_bar(self, datatype, ticker, df):
         df['SMA_short'] = talib.SMA(df['close'], timeperiod=self.short)
         df['SMA_long'] = talib.SMA(df['close'], timeperiod=self.long)
-        df = df.round({'SMA_short': 2, 'SMA_long': 2})
         sma_short_last = df['SMA_short'].iloc[-2]
         sma_short_cur = df['SMA_short'].iloc[-1]
 
