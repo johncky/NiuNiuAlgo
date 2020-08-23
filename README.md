@@ -24,9 +24,11 @@ Algorithmic trading system for algo trading on FutuNiuNiu broker (project is not
   - MYSQL_PWD: password of your user</li>
 
 ```python
+    import FutuAlgo
+
     INIT_DATATYPE = ['K_3M', 'K_5M', 'QUOTE']
     INIT_TICKERS = ['HK.00700', 'HK_FUTURE.999010']
-    futu_hook = FutuHook()
+    futu_hook = FutuAlgo.FutuHook()
     # Subscribe to datatypes and tickers
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)
     futu_hook.run(fill_db=True)
@@ -43,7 +45,9 @@ Functions:
 ### Example: SMA Crossover
 
 ```python
-class SMACrossover(CandlestickStrategy):
+import FutuAlgo
+
+class SMACrossover(FutuAlgo.CandlestickStrategy):
     def __init__(self, short, long):
         super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long + 1)
         self.short = short
@@ -99,7 +103,7 @@ class SMACrossover(CandlestickStrategy):
 Quick back-test in research stage: [QuickBacktest](http://www.github.com/johncky/QuickBacktest)
 
 ```python
-    from quickBacktest import Strategy
+    from QuickBacktest.quickBacktest import Strategy
 
     class SMA(Strategy):
         def init(self):
@@ -148,7 +152,9 @@ Inhertie from Backtest class, and run algo.backtest().
 You must fill your MySQL database with historical data first. You can do so through FutuHook API /db/fill.
 
 ```python
-class SMACrossover(Backtest):
+import FutuAlgo
+
+class SMACrossover(FutuAlgo.Backtest):
     def __init__(self, short, long):
         super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long+1)
         self.short = short
@@ -224,8 +230,10 @@ Functions:
 in Webapp/app.py:
 
 ```python
+    import FutuAlgo
+    
     if __name__ == '__main__':
-        app = WebApp()
+        app = FutuAlgo.WebApp()
         app.run(port=8522, hook_ip='http://127.0.0.1:8000')
 ```
 
