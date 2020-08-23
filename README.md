@@ -96,7 +96,7 @@ class SMACrossover(FutuAlgo.CandlestickStrategy):
     algo.run(5000)
 ```
 
-### Backtesting - research stage quick back-test</h3>
+## Backtesting - research stage quick back-test</h3>
 Quick back-test module for research purpose: [QuickBacktest](http://www.github.com/johncky/QuickBacktest)
 
 ```python
@@ -143,7 +143,7 @@ Quick back-test module for research purpose: [QuickBacktest](http://www.github.c
     result.ticker_plot('FB')
 ```
 
-### Backtesting - Using Algo Class
+## Backtesting - Using Algo Class
 Use Algo class to back-test Strategies. This is useful when you have strategies that uses multiple 
 data types and data source.
 
