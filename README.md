@@ -100,9 +100,9 @@ class SMACrossover(FutuAlgo.CandlestickStrategy):
 Quick back-test module for research purpose: [QuickBacktest](http://www.github.com/johncky/QuickBacktest)
 
 ```python
-    from QuickBacktest.quickBacktest import Strategy
+    import QuickBacktest
 
-    class SMA(Strategy):
+    class SMA(QuickBacktest.Strategy):
         def init(self):
             self.data['sma16'] = self.data['adjclose'].rolling(16).mean()
             self.data['sma32'] = self.data['adjclose'].rolling(32).mean()
