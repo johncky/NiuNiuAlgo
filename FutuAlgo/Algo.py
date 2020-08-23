@@ -68,7 +68,7 @@ class BaseAlgo(ABC):
     def initialize(self, initial_capital: float, mq_ip: str,
                    hook_ip: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
-                   txn_cost: float = 30, per_ticker_max_cache: int = 10000,
+                   txn_cost: float = 30, per_ticker_max_cache: int = 3000,
                    test_mq_con=True, hook_name: str = 'FUTU', **kwargs):
         try:
             datatypes = list(set(datatypes).intersection(d_types))
