@@ -1,6 +1,5 @@
 from FutuAlgo.Algo import CandlestickStrategy
 import datetime
-import talib
 
 reconciliation_trades = 'Trade_Recon/{}.xlsx'
 
@@ -13,8 +12,8 @@ class SMACrossover(CandlestickStrategy):
 
     async def on_bar(self, datatype, ticker, df):
         if datatype == 'K_3M':
-            df['SMA_short'] = talib.SMA(df['close'], timeperiod=self.short)
-            df['SMA_long'] = talib.SMA(df['close'], timeperiod=self.long)
+            df['SMA_short'] = df['close'].rolling(self.short).mean()
+            df['SMA_long'] = df['close'].rolling(self.long).mean()
 
             sma_short_last = df['SMA_short'].iloc[-2]
             sma_short_cur = df['SMA_short'].iloc[-1]
