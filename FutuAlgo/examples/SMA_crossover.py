@@ -22,20 +22,14 @@ class SMACrossover(CandlestickStrategy):
             sma_long_last = df['SMA_long'].iloc[-2]
             sma_long_cur = df['SMA_long'].iloc[-1]
 
-            print(f'Datetime: {df["datetime"].iloc[-1]} , Last: {sma_short_last}/{sma_long_last}, Current: {sma_short_cur}/{sma_long_cur}')
-            print('\n')
-            df.to_excel(f'Trade_Recon/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_{ticker}.xlsx')
-
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
                 self.buy_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                price=self.get_price(ticker=ticker)+1)
 
-                df.to_excel(f'Trade_Recon_Trade/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_BUY_{ticker}.xlsx')
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
                 self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                       price=self.get_price(ticker=ticker)-1)
-                df.to_excel(f'Trade_Recon_Trade/{datetime.datetime.now().strftime("%Y%m%d_%H_%M_%S")}_SELL_{ticker}.xlsx')
         else:
             pass
 
@@ -61,5 +55,5 @@ if __name__ == '__main__':
     algo.initialize(initial_capital=20000000.0, mq_ip='tcp://127.0.0.1:8001',
                     hook_ip='http://127.0.0.1:8000',
                     hook_name='FUTU', trading_environment='SIMULATE',
-                    trading_universe=['HK.00700', 'HK.54544554', 'HK.09988', 'HK.09999', 'HK.02318'], datatypes=['K_3M'])
+                    trading_universe=['HK.00700'], datatypes=['K_3M'])
     algo.run(5000)
