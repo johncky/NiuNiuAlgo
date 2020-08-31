@@ -563,8 +563,8 @@ class BaseAlgo(ABC):
                 pending_orders = pending_orders.loc[pending_orders['updated_time'] >= start_date]
         else:
             pending_orders = pd.DataFrame()
-        return response.json(
-            {'ret_code': 1, 'return': {'content': {'pending_orders': pending_orders.to_dict('records')}}}, default=str)
+        # return response.json({'ret_code': 1, 'return': {'content': {'pending_orders': pending_orders.to_dict('records')}}}, default=str)
+        return response.json({'ret_code': 1, 'return': {'content': {'pending_orders': pending_orders.to_dict('records')}}})
 
     async def get_completed_orders(self, request):
         start_date = request.args.get('start_date')
