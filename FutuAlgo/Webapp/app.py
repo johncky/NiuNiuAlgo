@@ -533,6 +533,7 @@ class WebApp:
 
     def app_add_route(self, app):
         pkg_path = os.path.dirname(os.path.realpath(__file__))
+        print(pkg_path + '\\static')
         app.static('/static', pkg_path + '\\static')
 
         app.add_route(self.index, '/', methods=['GET'])
