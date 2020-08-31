@@ -96,7 +96,7 @@ class FutuOrderUpdateHandler(TradeOrderHandlerBase):
             # df['create_time'] = pd.to_datetime(df['create_time'])
             # df['update_time'] = pd.to_datetime(df['update_time'])
             self.queue.put((f'FUTU.ORDER_UPDATE.{df["order_id"].iloc[0]}', df))
-            print(df['order_status'])
+            # print(df['order_status'])
         return ret, df
 
 
@@ -144,11 +144,11 @@ class FutuHook():
         # ZMQ Publish and Pair sockets
         self.zmq_context = zmq.asyncio.Context()
         self.mq_socket = self.zmq_context.socket(zmq.PUB)
-        self.mq_socket.bind(f"tcp://127.0.0.1:{self.ZMQ_PORT}")
+        self.mq_socket.bind(f"tcp://0.0.0.0:{self.ZMQ_PORT}")
         self.hello_socket = self.zmq_context.socket(zmq.PAIR)
-        self.hello_socket.bind(f"tcp://127.0.0.1:{int(self.ZMQ_PORT) + 1}")
-        self.logger.debug(f'ZMQ publisher binded @ tcp://127.0.0.1:{self.ZMQ_PORT}')
-        self.logger.debug(f'ZMQ pair binded @ tcp://127.0.0.1:{int(self.ZMQ_PORT) + 1}')
+        self.hello_socket.bind(f"tcp://0.0.0.0:{int(self.ZMQ_PORT) + 1}")
+        self.logger.debug(f'ZMQ publisher binded @ tcp://0.0.0.0:{self.ZMQ_PORT}')
+        self.logger.debug(f'ZMQ pair binded @ tcp://0.0.0.0:{int(self.ZMQ_PORT) + 1}')
 
         # Sanic App
         self.app = Sanic('FutuHook')
@@ -190,7 +190,7 @@ class FutuHook():
                     datatype = topic.split('.')[1]
                     self.tmp_storage[datatype] = self.tmp_storage[datatype].append(df)
                     await self.mq_socket.send_multipart([bytes(topic, 'utf-8'), pickle.dumps(df)])
-                    print(f'Published data : {topic}')
+                    # print(f'Published data : {topic}')
                     self.queue.task_done()
 
             if (time.time() - self._db_last_saved) > self._db_save_freq:
