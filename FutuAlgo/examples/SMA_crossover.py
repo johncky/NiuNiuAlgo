@@ -51,8 +51,9 @@ class SMACrossover(CandlestickStrategy):
 
 if __name__ == '__main__':
     algo = SMACrossover(short=10, long=20)
-    algo.initialize(initial_capital=20000000.0, mq_ip='tcp://127.0.0.1:8001',
-                    hook_ip='http://127.0.0.1:8000',
+    algo.initialize(initial_capital=20000000.0,
+                    mq_ip='tcp://0.0.0.0:8001',
+                    hook_ip='http://0.0.0.0:8000',
                     hook_name='FUTU', trading_environment='SIMULATE',
                     trading_universe=['HK.00700'], datatypes=['K_3M'])
-    algo.run(5000)
+    algo.run(sanic_port=5000, sanic_host='0.0.0.0')
