@@ -607,7 +607,7 @@ class FutuHook():
             start_date = request.form.get('start_date')
             end_date = request.form.get('end_date')
 
-            result_status = self.fill_db(tickers=[ticker], datatypes=[datatype], start_date=start_date,end_date=end_date)
+            result_status = await self.fill_db(tickers=[ticker], datatypes=[datatype], start_date=start_date,end_date=end_date)
 
             if len(result_status['Success']) > 0:
                 return response.json({'ret_code': 1, 'return': {'content': 'Successful'}})
