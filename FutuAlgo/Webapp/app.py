@@ -529,6 +529,7 @@ class WebApp:
 
     def app_add_route(self, app):
         app.static('/static', './static')
+        app.static('/templates', './templates')
         app.add_route(self.index, '/', methods=['GET'])
         app.add_route(self.get_data, '/data', methods=['GET'])
         app.add_route(self.add_algo, '/add_algo', methods=['GET'])
