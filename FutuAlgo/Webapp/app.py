@@ -10,6 +10,8 @@ import aiohttp
 from aiohttp import ClientConnectionError
 import math
 import random
+import pkgutil
+
 
 BENCHMARK_TICKER = {'HSI': 'HK.800000', 'SPX': 'HK.800000'}
 
@@ -520,16 +522,16 @@ class WebApp:
     async def index(self, request):
         algo_data = await self.get_all_data()
         data = json.dumps({'data': algo_data})
+        template = pkgutil.get_data(__name__, "templates/index.html")
 
-        with open('templates/index.html') as file:
-            template = Template(file.read())
-
+        # with open('templates/index.html') as file:
+        #     template = Template(file.read())
+        template = Template(template)
         t = response.html(template.render(data=data, url_for=self.app.url_for))
         return t
 
     def app_add_route(self, app):
         app.static('/static', './static')
-        app.static('/templates', './templates')
         app.add_route(self.index, '/', methods=['GET'])
         app.add_route(self.get_data, '/data', methods=['GET'])
         app.add_route(self.add_algo, '/add_algo', methods=['GET'])
