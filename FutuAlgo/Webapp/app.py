@@ -11,7 +11,7 @@ from aiohttp import ClientConnectionError
 import math
 import random
 import pkgutil
-
+import os
 
 BENCHMARK_TICKER = {'HSI': 'HK.800000', 'SPX': 'HK.800000'}
 
@@ -532,7 +532,8 @@ class WebApp:
         return t
 
     def app_add_route(self, app):
-        app.static('/static', './static')
+        pkg_path = os.path.dirname(os.path.realpath(__file__))
+        app.static('/static', pkg_path + '\\static')
 
         app.add_route(self.index, '/', methods=['GET'])
         app.add_route(self.get_data, '/data', methods=['GET'])
