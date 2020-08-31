@@ -317,7 +317,7 @@ class WebApp:
 
         async def _run():
             tasks = list()
-            web_server = self.app.create_server(return_asyncio_server=True, port=port)
+            web_server = self.app.create_server(host='0.0.0.0', return_asyncio_server=True, port=port)
             tasks.append(web_server)
             await asyncio.gather(*tasks)
 
