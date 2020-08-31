@@ -522,7 +522,7 @@ class WebApp:
     async def index(self, request):
         algo_data = await self.get_all_data()
         data = json.dumps({'data': algo_data})
-        template = pkgutil.get_data(__name__, "templates/index.html")
+        template = pkgutil.get_data(__name__, "templates/index.html").decode("utf-8")
 
         # with open('templates/index.html') as file:
         #     template = Template(file.read())
