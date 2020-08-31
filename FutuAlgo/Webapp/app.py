@@ -526,8 +526,8 @@ class WebApp:
 
         # with open('templates/index.html') as file:
         #     template = Template(file.read())
-        print(template.read())
-        template = Template(template.read())
+        print(template)
+        template = Template(template)
         t = response.html(template.render(data=data, url_for=self.app.url_for))
         return t
 
