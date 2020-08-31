@@ -532,7 +532,8 @@ class WebApp:
         return t
 
     def app_add_route(self, app):
-        app.static('static', './static')
+        app.static('/static', './static')
+
         app.add_route(self.index, '/', methods=['GET'])
         app.add_route(self.get_data, '/data', methods=['GET'])
         app.add_route(self.add_algo, '/add_algo', methods=['GET'])
@@ -542,4 +543,4 @@ class WebApp:
 if __name__ == '__main__':
     app = WebApp()
     # name & sanic ip address of the running algo
-    app.run(8522, hook_ip='http://127.0.0.1:8000')
+    # app.run(8522, hook_ip='http://127.0.0.1:8000')
