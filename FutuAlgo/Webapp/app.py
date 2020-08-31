@@ -229,6 +229,7 @@ class WebApp:
         pv_df['x'] = pd.to_datetime(pd.to_datetime(pv_df['x']).dt.strftime('%Y-%m-%d'))
         pv_df = pv_df.set_index('x').resample('D').last().reset_index()
         benchmark_df = benchmark_df.rename(columns={'datetime': 'x'})
+        print(pv_df.merge(benchmark_df, how='right', on=['x']).dropna())
         pv_bmk_df = pv_df.merge(benchmark_df, how='right', on=['x']).dropna()[['x', 'y', 'close']].set_index('x')
         if pv_bmk_df.shape[0] <= 1:
             return (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0,0,0)
