@@ -8,7 +8,7 @@ from sanic import Sanic
 from sanic import response
 import pandas as pd
 import time
-from FutuAlgo.FutuHook import d_types
+from FutuAlgo.FutuHook import supported_dtypes
 import datetime
 import requests
 import itertools
@@ -16,8 +16,20 @@ import collections
 import random
 
 
+def period_to_start_date(period):
+    if 'D' in period:
+        return datetime.datetime.today() - datetime.timedelta(days=int(period.split('D')[0]))
+    elif 'M' in period:
+        return datetime.datetime.today() - datetime.timedelta(days=int(period.split('M')[0])*31)
+    elif 'Y' in period:
+        return datetime.datetime.today() - datetime.timedelta(days=int(period.split('Y')[0])*365)
+    else:
+        return None
+
+
 class BaseAlgo(ABC):
-    def __init__(self, name: str, log_path='.', benchmark: str = 'SPX'):
+    def __init__(self, name: str, log_path='.', benchmark: str = 'HSI'):
+        """ Define attributes with null values """
         # settings
         self.name = name
         self.benchmark = benchmark
@@ -56,6 +68,7 @@ class BaseAlgo(ABC):
         # Cache
         self.cache = None
         self._per_ticker_max_cache = 0
+        self._prefill_period=None
 
         # Web
         self._sanic = None
@@ -69,9 +82,10 @@ class BaseAlgo(ABC):
                    hook_ip: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
                    txn_cost: float = 30, per_ticker_max_cache: int = 3000,
-                   test_mq_con=True, hook_name: str = 'FUTU', **kwargs):
+                   test_mq_con=True, hook_name: str = 'FUTU', prefill_period='1Y', **kwargs):
+        """ Initialize attributes and test connections with FutuHook ZMQ and API """
         try:
-            datatypes = list(set(datatypes).intersection(d_types))
+            datatypes = list(set(datatypes).intersection(supported_dtypes))
 
             self._trading_environment = trading_environment
             self._trading_universe = trading_universe
@@ -108,8 +122,8 @@ class BaseAlgo(ABC):
                     msg = test_socket.recv_string()
                     if msg != 'Pong':
                         raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}')
-                    self.logger.info(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
-                    self.logger.info(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
+                    self.logger.debug(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
+                    self.logger.debug(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
 
                 except zmq.error.Again:
                     raise Exception(f'Failed to connect to ZMQ, please check {self._mq_ip}')
@@ -119,26 +133,24 @@ class BaseAlgo(ABC):
             # Test Connection with Hook
             try:
                 requests.get(self._hook_ip + '/subscriptions').json()
-                self.logger.info(f'Test Connection with Hook IP f{self._hook_ip} is Successful!')
+                self.logger.debug(f'Test Connection with FutuHook IP f{self._hook_ip} is Successful!')
             except requests.ConnectionError:
-                raise Exception(f'Failed to connect to Hook, please check: {self._hook_ip}')
+                raise Exception(f'Connection with FutuHook failed, please check: {self._hook_ip}')
 
-            # Subscription data
             self.ticker_lot_size = dict()
             self._failed_tickers = list()
             self._topics = list()
 
             # Cache
             self.cache = collections.defaultdict(lambda: collections.defaultdict(lambda: pd.DataFrame()))
-            # for datatype in d_types:
-            #     self.cache[datatype] = pd.DataFrame()
             self._per_ticker_max_cache = per_ticker_max_cache
+            self._prefill_period = prefill_period
 
             self.initialized_date = datetime.datetime.today()
             self._running = False
 
             self._initialized = True
-            self.logger.info('Initialized sucessfully.')
+            self.logger.debug('Initialized sucessfully.')
 
         except Exception as e:
             self._initialized = False
@@ -160,13 +172,10 @@ class BaseAlgo(ABC):
         self._zmq_context = zmq.asyncio.Context()
         self._mq_socket = self._zmq_context.socket(zmq.SUB)
         self._mq_socket.connect(self._mq_ip)
-        self.subscribe_tickers(tickers=self._trading_universe)
-
-        # for ticker in self._trading_universe:
-        #     self.positions.loc[ticker] = [0.0, 0.0, 0.0]
+        self.subscribe_tickers(tickers=self._trading_universe, prefill_period=self._prefill_period)
 
         self._running = True
-        self.logger.info(f'Algo {self.name} running successfully!')
+        self.logger.debug(f'Algo {self.name} running successfully!')
 
         while True:
 
@@ -234,10 +243,10 @@ class BaseAlgo(ABC):
     async def on_order_update(self, order_id, df):
         pass
 
-    def run(self, sanic_port, sanic_host='127.0.0.1'):
+    def run(self, sanic_port, sanic_host='127.0.0.1', prefill_period='1Y'):
 
         if not self._initialized:
-            self.logger.info('Algo not initialized')
+            self.logger.debug('Algo not initialized')
         else:
             loop = asyncio.get_event_loop()
             self._sanic = Sanic(self.name)
@@ -358,9 +367,7 @@ class BaseAlgo(ABC):
         else:
             return 0, result['return']['content']
 
-    def load_ticker_cache(self, ticker, datatype,
-                          start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d'),
-                          from_exchange=False):
+    def load_ticker_cache(self, ticker, datatype, start_date, from_exchange=False):
         ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
                                                 from_exchange=from_exchange)
 
@@ -369,8 +376,7 @@ class BaseAlgo(ABC):
         else:
             raise Exception(f'Failed to download historical data from Hook due to {df}')
 
-    def load_all_cache(self, tickers=None,
-                       start_date=(datetime.datetime.today() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')):
+    def load_all_cache(self, start_date, tickers=None):
 
         tickers = self._trading_universe if tickers is None else tickers
         for dtype in self._datatypes:
@@ -523,10 +529,10 @@ class BaseAlgo(ABC):
     async def get_records(self, request):
         start_date = request.args.get('start_date')
         rows = request.args.get('rows')
+
+        record = self.records
         if rows is not None:
-            record = self.records.iloc[-int(rows):]
-        else:
-            record = self.records
+            record = record.iloc[-int(rows):]
 
         if start_date is not None:
             record = record.loc[self.records.index >= start_date]
@@ -579,13 +585,13 @@ class BaseAlgo(ABC):
         return response.json(
             {'ret_code': 1, 'return': {'content': {'completed_orders': completed_orders.to_dict('records')}}})
 
-    def subscribe_tickers(self, tickers):
+    def subscribe_tickers(self, tickers, prefill_period):
         if len(tickers) > 0:
             tickers = pd.unique(tickers).tolist()
             self._trading_universe = list(set(self._trading_universe).union(tickers))
             succeed, failed = self.load_ticker_lot_size(tickers=tickers)
 
-            self.load_all_cache(tickers=succeed)
+            self.load_all_cache(tickers=succeed, start_date=period_to_start_date(prefill_period))
             new_topics = self.add_new_topics(tickers=succeed)
 
             for ticker in succeed:
@@ -602,8 +608,12 @@ class BaseAlgo(ABC):
         tickers = eval(request.args.get('tickers'))
         new_tickers = list(set(tickers).difference(self._trading_universe))
 
-        self.subscribe_tickers(tickers=new_tickers)
-        return response.json({'s': 's'})
+        self.subscribe_tickers(tickers=new_tickers, prefill_period=self._prefill_period)
+        try:
+            return response.json({'ret_code': 1, 'return': {'content': {'universe': list(self._trading_universe),
+                                                                        'datatypes': list(self._datatypes)}}})
+        except Exception as e:
+            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     async def unsubscribe_ticker(self, request):
         tickers = eval(request.args.get('tickers'))
@@ -614,16 +624,20 @@ class BaseAlgo(ABC):
             self._mq_socket.unsubscribe(topic)
         self._topics = list(set(self._topics).difference(new_topics))
         self._trading_universe = list(set(self._trading_universe).difference(tickers))
-        # TODO: return stuffs
+        try:
+            return response.json({'ret_code': 1, 'return': {'content': {'universe': list(self._trading_universe),
+                                                                        'datatypes': list(self._datatypes)}}})
+        except Exception as e:
+            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     async def pause(self, request):
         self._running = False
-        # TODO: return stuffs
+        return response.json({'ret_code': 1, 'return': {'content': {'running': self._running}}})
 
     async def resume(self, request):
         if self._initialized:
             self._running = True
-        # TODO: return stuffs
+        return response.json({'ret_code': 1, 'return': {'content': {'running': self._running}}})
 
     def app_add_route(self, app):
         app.add_route(self.get_records, '/curves', methods=['GET'])
@@ -688,17 +702,17 @@ class Backtest(BaseAlgo):
 
     def backtest(self, start_date, end_date):
         if not self._initialized:
-            self.logger.info('Algo not initialized')
+            self.logger.debug('Algo not initialized')
             return
 
-        self.logger.info(f'Backtesting Starts...')
+        self.logger.debug(f'Backtesting Starts...')
 
         # No need to load ticker cache
         succeed, failed = self.load_ticker_lot_size(tickers=self._trading_universe)
         for ticker in succeed:
             self.positions.loc[ticker] = [0.0, 0.0, 0.0]
 
-        self.logger.info(f'Loading Date from MySQL DB...')
+        self.logger.debug(f'Loading Date from MySQL DB...')
         backtest_df = pd.DataFrame()
         for tk in self._trading_universe:
             for dtype in self._datatypes:
@@ -717,7 +731,7 @@ class Backtest(BaseAlgo):
                 if df.shape[0] > 0:
                     backtest_df = backtest_df.append(df)
                     self.add_cache(datatype=dtype, df=filler, ticker=tk)
-                    self.logger.info(
+                    self.logger.debug(
                         f'Backtesting {tk} from {df["datetime"].iloc[0]}')
                 else:
                     self.logger.warn(f'Not Enough bars to backtest {dtype}.{tk}')
@@ -725,7 +739,7 @@ class Backtest(BaseAlgo):
 
         backtest_df = backtest_df.sort_values(by=['datetime', 'datatype', 'ticker'], ascending=True)
 
-        self.logger.info(f'Loaded Data, backtesting starts...')
+        self.logger.debug(f'Loaded Data, backtesting starts...')
 
         async def _backtest():
             self._order_queue = list()
@@ -773,7 +787,7 @@ class Backtest(BaseAlgo):
                 if trigger_strat:
                     await self.trigger_strat(datatype=tgr_dtype, ticker=tgr_ticker, df=tgr_df)
 
-            self.logger.info('Backtesting Completed! Call report() method to see backtesting result!')
+            self.logger.debug('Backtesting Completed! Call report() method to see backtesting result!')
 
         asyncio.run(_backtest())
 

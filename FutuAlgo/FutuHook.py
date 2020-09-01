@@ -11,7 +11,7 @@ import numpy as np
 from FutuAlgo import Logger
 import collections
 
-d_types = ('K_DAY', 'K_1M', 'K_3M', 'K_5M', 'K_15M', 'QUOTE', 'ORDER_UPDATE')
+supported_dtypes = ('K_DAY', 'K_1M', 'K_3M', 'K_5M', 'K_15M', 'QUOTE', 'ORDER_UPDATE')
 
 schemas_sql = {'K': """CREATE TABLE IF NOT EXISTS `{}`.`FUTU_{}` (
   `ticker` VARCHAR(40) NOT NULL,
@@ -122,12 +122,9 @@ class FutuHook():
         self.quote_context = OpenQuoteContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
 
         self.trade_contexts = dict()
-        self.trade_contexts['HK'] = OpenHKTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        self.trade_contexts['US'] = OpenUSTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        self.trade_contexts['CN'] = OpenCNTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
-        self.trade_contexts['HK'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
-        self.trade_contexts['US'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
-        self.trade_contexts['CN'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        for mkt in ('HK', 'US', 'CN'):
+            self.trade_contexts[mkt] = OpenHKTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+            self.trade_contexts[mkt].set_handler(FutuOrderUpdateHandler(queue=self.queue))
 
         self.quote_context.set_handler(FutuQuoteHandler(queue=self.queue))
         self.quote_context.set_handler(FutuKlineHandler(queue=self.queue))
@@ -205,7 +202,7 @@ class FutuHook():
 
                 self._db_last_saved = time.time()
 
-    async def ping_pong(self):
+    async def connection_entry(self):
         while True:
             msg = await self.hello_socket.recv_string()
             if msg == 'Ping':
@@ -222,11 +219,14 @@ class FutuHook():
             web_server = self.app.create_server(return_asyncio_server=True, host=self.SANIC_HOST, port=self.SANIC_PORT)
             tasks.append(web_server)
             tasks.append(self.publish())
-            tasks.append(self.ping_pong())
+            tasks.append(self.connection_entry())
             await self.db_create_schemas()
             if fill_db:
                 subscriptions = self.query_subscriptions()[1]
-                fill_db_result = await self.fill_db(tickers=tuple(subscriptions.values())[0], datatypes=subscriptions.keys())
+                sub_tickers = set()
+                for _list in tuple(subscriptions.values()):
+                    sub_tickers = sub_tickers.union(set(_list))
+                fill_db_result = await self.fill_db(tickers=list(sub_tickers), datatypes=subscriptions.keys())
                 self.logger.info(f'Fill DB status: {fill_db_result}')
             await asyncio.gather(*tasks)
         self._running = True
@@ -238,7 +238,7 @@ class FutuHook():
         conn = await self.db_get_conn()
         cursor = await conn.cursor()
 
-        for dtype in d_types:
+        for dtype in supported_dtypes:
             if 'K_' in dtype:
                 try:
                     await cursor.execute(schemas_sql['K'].format(self.MYSQL_DB, dtype))
@@ -420,7 +420,7 @@ class FutuHook():
     async def get_historicals(self, request):
         try:
             datatype = request.args.get('datatype')
-            assert datatype in d_types, f"Invalid data type {datatype}"
+            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
             from_exchange = True if request.args.get('from_exchange').upper() == 'TRUE' else False
             ticker = request.args.get('ticker')
             start_date = request.args.get('start_date')
@@ -458,7 +458,7 @@ class FutuHook():
     async def db_get_last_update_time(self, request):
         try:
             datatype = request.args.get('datatype').upper()
-            assert datatype in d_types, f"Invalid data type {datatype}"
+            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
             sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(self.MYSQL_DB, datatype)
             conn = await self.db_get_conn()
             cur = await conn.cursor()
@@ -597,22 +597,30 @@ class FutuHook():
                     status['Fail'].append(msg)
         return status
 
-    # POST: ticker, datatype, start_date
+    # POST: tickers, datatypes, start_date
     async def db_fill_data(self, request):
         try:
-            ticker = request.form.get('ticker').upper()
+            ticker = request.form.get('tickers').upper()
             assert ticker is not None, "ticker cannot be empty"
-            datatype = request.form.get('datatype').upper()
-            assert datatype in d_types, f"Invalid data type {datatype}"
+            if ('[' in ticker) and (']' in ticker):
+                ticker = eval(ticker)
+            else:
+                ticker = [ticker]
+            datatype = request.form.get('datatypes').upper()
+            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
+            if ('[' in datatype) and (']' in datatype):
+                datatype = eval(datatype)
+            else:
+                datatype = [datatype]
             start_date = request.form.get('start_date')
             end_date = request.form.get('end_date')
 
-            result_status = await self.fill_db(tickers=[ticker], datatypes=[datatype], start_date=start_date,end_date=end_date)
+            result_status = await self.fill_db(tickers=ticker, datatypes=datatype, start_date=start_date,end_date=end_date)
 
             if len(result_status['Success']) > 0:
-                return response.json({'ret_code': 1, 'return': {'content': 'Successful'}})
+                return response.json({'ret_code': 1, 'return': {'content': result_status}})
             else:
-                return response.json({'ret_code': 0, 'return': {'content': f'{result_status["Fail"][0]}'}})
+                return response.json({'ret_code': 0, 'return': {'content': result_status}})
         except Exception as e:
             return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
