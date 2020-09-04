@@ -187,7 +187,7 @@ class FutuHook():
                     datatype = topic.split('.')[1]
                     self.tmp_storage[datatype] = self.tmp_storage[datatype].append(df)
                     await self.mq_socket.send_multipart([bytes(topic, 'utf-8'), pickle.dumps(df)])
-                    # print(f'Published data : {topic}')
+                    print(f'Published data : {topic}')
                     self.queue.task_done()
 
             if (time.time() - self._db_last_saved) > self._db_save_freq:
@@ -660,7 +660,7 @@ class FutuHook():
 
 if __name__ == '__main__':
     # Start FutuHook
-    INIT_DATATYPE = ['K_DAY']
+    INIT_DATATYPE = ['K_3M']
     INIT_TICKERS = ['HK.00700', 'HK.09988', 'HK.09999', 'HK.02318', 'HK.02800', 'HK.01211']
     futu_hook = FutuHook()
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)

@@ -15,25 +15,18 @@ class SMACrossover(Backtest):
         df['SMA_short'] = df['close'].rolling(self.short).mean()
         df['SMA_long'] = df['close'].rolling(self.long).mean()
         df = df.round({'SMA_short': 2, 'SMA_long': 2})
+
         sma_short_last = df['SMA_short'].iloc[-2]
         sma_short_cur = df['SMA_short'].iloc[-1]
 
         sma_long_last = df['SMA_long'].iloc[-2]
         sma_long_cur = df['SMA_long'].iloc[-1]
 
-        self._test_df[df.datetime.iloc[-1].strftime('%Y-%m-%d')] = df
-        self.rq[df.datetime.iloc[-1].strftime('%Y-%m-%d')] = {'first': sma_short_last <= sma_long_last,
-                                                              'second': sma_short_cur > sma_long_cur,
-                                                              'third': self.get_qty(ticker) == 0,
-                                                              'qty': self.get_qty(ticker)}
-
         if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
             self.buy_next_open(ticker=ticker, quantity=self.cal_max_buy_qty(ticker), datatype='K_DAY')
-            # df.to_excel(f'Trade_Recon/{df["datetime"].iloc[-1].strftime("%Y%m%d_%H_%M")}_BUY_{ticker}.xlsx')
 
         elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
             self.sell_next_open(ticker=ticker, quantity=self.get_qty(ticker),datatype='K_DAY')
-            # df.to_excel(f'Trade_Recon/{df["datetime"].iloc[-1].strftime("%Y%m%d_%H_%M")}_SELL_{ticker}.xlsx')
 
     async def on_order_update(self, order_id, df):
         pass
