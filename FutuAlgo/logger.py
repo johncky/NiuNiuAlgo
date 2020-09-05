@@ -2,7 +2,6 @@ import logging
 import os
 
 
-
 class LevelFilter(object):
     def __init__(self, level):
         self.level = level
@@ -19,7 +18,6 @@ class RootLogger:
 
         if not os.path.exists(self.file_path):
             os.mkdir(self.file_path)
-        # self.baseformatter = logging.Formatter('%(asctime)s:%(module)s:%(funcName)s:%(message)s')
         self.baseformatter = logging.Formatter('%(asctime)s: %(levelname)s:[%(filename)s]: %(message)s')
         self.set_root(level=level)
 

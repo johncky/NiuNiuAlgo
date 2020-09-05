@@ -1,4 +1,4 @@
-from FutuAlgo.Algo import Backtest
+from FutuAlgo.algo import Backtest
 import os
 os.environ['PYTHONASYNCIODEBUG'] = '1'
 
@@ -22,11 +22,11 @@ class SMACrossover(Backtest):
         sma_long_last = df['SMA_long'].iloc[-2]
         sma_long_cur = df['SMA_long'].iloc[-1]
 
-        if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
-            self.buy_next_open(ticker=ticker, quantity=self.cal_max_buy_qty(ticker), datatype='K_DAY')
+        if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_current_qty(ticker) == 0):
+            self.buy_next_open(ticker=ticker, quantity=self.calc_max_buy_qty(ticker), datatype='K_DAY')
 
-        elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
-            self.sell_next_open(ticker=ticker, quantity=self.get_qty(ticker),datatype='K_DAY')
+        elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_current_qty(ticker) > 0):
+            self.sell_next_open(ticker=ticker, quantity=self.get_current_qty(ticker), datatype='K_DAY')
 
     async def on_order_update(self, order_id, df):
         pass

@@ -1,19 +1,9 @@
 from abc import ABC, abstractmethod
-from FutuAlgo import Logger
-import zmq
-import zmq.asyncio
-import pickle
-import asyncio
-from sanic import Sanic
-from sanic import response
+from FutuAlgo import logger
+import zmq, pickle, asyncio, zmq.asyncio, time, datetime, requests, itertools, collections, random
+from sanic import Sanic, response
 import pandas as pd
-import time
-from FutuAlgo.FutuHook import supported_dtypes
-import datetime
-import requests
-import itertools
-import collections
-import random
+from config import *
 
 
 def period_to_start_date(period):
@@ -24,7 +14,7 @@ def period_to_start_date(period):
     elif 'Y' in period:
         return datetime.datetime.today() - datetime.timedelta(days=int(period.split('Y')[0])*365)
     else:
-        return None
+        raise Exception(f'Invalid period {period}')
 
 
 class BaseAlgo(ABC):
@@ -34,7 +24,7 @@ class BaseAlgo(ABC):
         self.name = name
         self.benchmark = benchmark
 
-        self.logger = Logger.RootLogger(root_name=self.name, file_path=log_path)
+        self._logger = logger.RootLogger(root_name=self.name, file_path=log_path)
 
         self._trading_environment = ''
         self._trading_universe = None
@@ -49,11 +39,11 @@ class BaseAlgo(ABC):
         self._current_cash = 0.0
 
         # Info
-        self.pending_orders = None
-        self.completed_orders = None
+        self._pending_orders = None
+        self._completed_orders = None
+        self._ticker_lot_size = None
         self.positions = None
         self.slippage = None
-        self.ticker_lot_size = None
         self.records = None
 
         # IPs
@@ -66,8 +56,8 @@ class BaseAlgo(ABC):
         self._hook_name = None
 
         # Cache
-        self.cache = None
-        self._per_ticker_max_cache = 0
+        self._cache = None
+        self._cache_rows = 0
         self._prefill_period=None
 
         # Web
@@ -75,28 +65,32 @@ class BaseAlgo(ABC):
         self._sanic_host = None
         self._sanic_port = None
 
-        self.initialized_date = None
+        self._initialized_date = None
         self._initialized = False
 
     def initialize(self, initial_capital: float, mq_ip: str,
                    hook_ip: str, trading_environment: str,
                    trading_universe: list, datatypes: list,
-                   txn_cost: float = 30, per_ticker_max_cache: int = 3000,
+                   txn_cost: float = 30, cache_rows: int = 3000,
                    test_mq_con=True, hook_name: str = 'FUTU', prefill_period='1Y', **kwargs):
-        """ Initialize attributes and test connections with FutuHook ZMQ and API """
-        try:
-            datatypes = list(set(datatypes).intersection(supported_dtypes))
+        """ Initialize attributes and test connections with FutuHook ZMQ and Web API """
 
+        assert trading_environment in ('BACKTEST', 'SIMULATE', 'REAL'), f'Invalid trading environment {trading_environment}'
+        assert initial_capital > 0, 'Initial Capital cannot be 0'
+        assert cache_rows > 1, 'No of cached data must be > 0 rows'
+
+        try:
+            valid_datatypes = list(set(datatypes).intersection(supported_dtypes))
             self._trading_environment = trading_environment
             self._trading_universe = trading_universe
 
-            self._datatypes = datatypes
+            self._datatypes = valid_datatypes
             self._txn_cost = txn_cost
             self._total_txn_cost = 0
 
-            self.pending_orders = dict()
+            self._pending_orders = dict()
             self.records = pd.DataFrame(columns=['PV', 'EV', 'Cash'])
-            self.completed_orders = pd.DataFrame(columns=['order_id'])
+            self._completed_orders = pd.DataFrame(columns=['order_id'])
             self.positions = pd.DataFrame(columns=['price', 'quantity', 'market_value'])
             self.slippage = pd.DataFrame(columns=['exp_price', 'dealt_price', 'dealt_qty', 'total_slippage'])
 
@@ -122,8 +116,8 @@ class BaseAlgo(ABC):
                     msg = test_socket.recv_string()
                     if msg != 'Pong':
                         raise Exception(f'Failed to connect to ZMQ, please check : {self._mq_ip}')
-                    self.logger.debug(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
-                    self.logger.debug(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
+                    self._logger.debug(f'Test Connection with ZMQ {self._mq_ip} is Successful!')
+                    self._logger.debug(f'Test Connection with ZMQ {hello_mq_ip} is Successful!')
 
                 except zmq.error.Again:
                     raise Exception(f'Failed to connect to ZMQ, please check {self._mq_ip}')
@@ -133,30 +127,30 @@ class BaseAlgo(ABC):
             # Test Connection with Hook
             try:
                 requests.get(self._hook_ip + '/subscriptions').json()
-                self.logger.debug(f'Test Connection with FutuHook IP f{self._hook_ip} is Successful!')
+                self._logger.debug(f'Test Connection with FutuHook IP f{self._hook_ip} is Successful!')
             except requests.ConnectionError:
                 raise Exception(f'Connection with FutuHook failed, please check: {self._hook_ip}')
 
-            self.ticker_lot_size = dict()
+            self._ticker_lot_size = dict()
             self._failed_tickers = list()
             self._topics = list()
 
             # Cache
-            self.cache = collections.defaultdict(lambda: collections.defaultdict(lambda: pd.DataFrame()))
-            self._per_ticker_max_cache = per_ticker_max_cache
+            self._cache = collections.defaultdict(lambda: collections.defaultdict(lambda: pd.DataFrame()))
+            self._cache_rows = cache_rows
             self._prefill_period = prefill_period
 
-            self.initialized_date = datetime.datetime.today()
+            self._initialized_date = datetime.datetime.today()
             self._running = False
 
             self._initialized = True
-            self.logger.debug('Initialized sucessfully.')
+            self._logger.debug('Initialized sucessfully.')
 
         except Exception as e:
             self._initialized = False
-            self.logger.error(f'Failed to initialize algo, reason: {str(e)}')
+            self._logger.error(f'Failed to initialize algo, reason: {str(e)}')
 
-    async def daily_record_performance(self):
+    async def record_daily_performance(self):
         while True:
             self.log()
             await asyncio.sleep(60 * 60 * 24 - time.time() % 60 * 60 * 24)
@@ -175,14 +169,13 @@ class BaseAlgo(ABC):
         self.subscribe_tickers(tickers=self._trading_universe, prefill_period=self._prefill_period)
 
         self._running = True
-        self.logger.debug(f'Algo {self.name} running successfully!')
+        self._logger.debug(f'Algo {self.name} running successfully!')
 
         while True:
 
             try:
                 topic, bin_df = await self._mq_socket.recv_multipart()
                 if not self._running:
-                    # await asyncio.sleep(0.5)
                     continue
 
                 topic_split = topic.decode('ascii').split('.')
@@ -201,13 +194,14 @@ class BaseAlgo(ABC):
                         await self.trigger_strat(datatype=tgr_dtype, ticker=tgr_ticker, df=tgr_df)
             except Exception as e:
                 self._running = False
-                self.logger.error(f'Exception occur, Algo stopped due to {str(e)}')
-                # raise
+                self._logger.error(f'Exception occur, Algo stopped due to {str(e)}')
 
     def determine_trigger(self, datatype, ticker, df):
+        """ logic that determine when to trigger events, return True in first element when trigger """
         return True, (datatype, ticker, df)
 
     async def trigger_strat(self, datatype, ticker, df):
+        """ route triggers to methods """
         if datatype == 'TICKER':
             await self.on_tick(ticker=ticker, df=df)
         elif datatype == 'QUOTE':
@@ -243,10 +237,9 @@ class BaseAlgo(ABC):
     async def on_order_update(self, order_id, df):
         pass
 
-    def run(self, sanic_port, sanic_host='127.0.0.1', prefill_period='1Y'):
-
+    def run(self, sanic_port, sanic_host='127.0.0.1'):
         if not self._initialized:
-            self.logger.debug('Algo not initialized')
+            self._logger.debug('Algo not initialized')
         else:
             loop = asyncio.get_event_loop()
             self._sanic = Sanic(self.name)
@@ -262,7 +255,7 @@ class BaseAlgo(ABC):
                 web_server = self._sanic.create_server(return_asyncio_server=True, host=sanic_host, port=sanic_port)
                 tasks.append(web_server)
                 tasks.append(self.main())
-                tasks.append(self.daily_record_performance())
+                tasks.append(self.record_daily_performance())
                 await asyncio.gather(*tasks)
 
             loop.create_task(_run())
@@ -270,7 +263,7 @@ class BaseAlgo(ABC):
 
     # ------------------------------------------------ [ Position ] ------------------------------------------
     def update_positions(self, df):
-        # record order df
+        """ Update position and cash on receiving updates from broker """
         trd_side = 1 if df['trd_side'].iloc[0].upper() in ('BUY', 'BUY_BACK') else -1
         dealt_qty = df['dealt_qty'].iloc[0] * trd_side
         avg_price = df['dealt_avg_price'].iloc[0]
@@ -280,9 +273,9 @@ class BaseAlgo(ABC):
 
         in_pending = False
         in_completed = False
-        if order_id in self.pending_orders.keys():
+        if order_id in self._pending_orders.keys():
             in_pending = True
-            last_order_update_df = self.pending_orders[order_id]
+            last_order_update_df = self._pending_orders[order_id]
 
             last_qty = last_order_update_df['dealt_qty'].iloc[0] * trd_side
             last_avg_price = last_order_update_df['dealt_avg_price'].iloc[0]
@@ -291,7 +284,7 @@ class BaseAlgo(ABC):
             qty_change = dealt_qty - last_qty
 
         else:
-            if order_id not in self.completed_orders['order_id']:
+            if order_id not in self._completed_orders['order_id']:
                 cash_change = - dealt_qty * avg_price
                 qty_change = dealt_qty
             else:
@@ -301,7 +294,7 @@ class BaseAlgo(ABC):
 
         if order_status in ('SUBMIT_FAILED', 'FILLED_ALL', 'CANCELLED_PART', 'CANCELLED_ALL', 'FAILED', 'DELETED'):
             if not in_completed:
-                self.completed_orders = self.completed_orders.append(df)
+                self._completed_orders = self._completed_orders.append(df)
 
                 if order_status in ('FILLED_ALL', 'CANCELLED_PART'):
                     # update slippage
@@ -315,10 +308,10 @@ class BaseAlgo(ABC):
                     cash_change -= self._txn_cost
 
                 if in_pending:
-                    del self.pending_orders[order_id]
+                    del self._pending_orders[order_id]
 
         else:
-            self.pending_orders[order_id] = df
+            self._pending_orders[order_id] = df
 
         # update positions and snapshot
         latest_price = self.positions.loc[ticker]['price']
@@ -329,6 +322,7 @@ class BaseAlgo(ABC):
         self._current_cash += cash_change
 
     def update_prices(self, datatype, df):
+        """ Update price for valuation of positions """
         if 'K_' in datatype:
             ticker = df['ticker'].iloc[0]
             qty = self.positions.loc[ticker]['quantity']
@@ -343,19 +337,19 @@ class BaseAlgo(ABC):
 
     # ------------------------------------------------ [ Data ] ------------------------------------------
     def add_cache(self, datatype, ticker, df):
-        self.cache[datatype][ticker] = self.cache[datatype][ticker].append(df).drop_duplicates(
+        self._cache[datatype][ticker] = self._cache[datatype][ticker].append(df).drop_duplicates(
             subset=['datetime', 'ticker'], keep='last')
-        self.cache[datatype][ticker] = self.cache[datatype][ticker].iloc[-self._per_ticker_max_cache:]
+        self._cache[datatype][ticker] = self._cache[datatype][ticker].iloc[-self._cache_rows:]
 
     def get_data(self, datatype, ticker: str, start_date: datetime.datetime = None, n_rows: int = None, sort_drop=True):
-        df = self.cache[datatype][ticker]
+        df = self._cache[datatype][ticker]
         if start_date:
             df = df.loc[df['datetime'] >= start_date]
         if n_rows:
             df = df.iloc[-n_rows:]
         if sort_drop:
             df = df.drop_duplicates(['datetime', 'ticker'], keep='last').sort_values(['datetime'])
-        return df.copy()
+        return df
 
     def download_historical(self, ticker, datatype, start_date=None, end_date=None, from_exchange=False):
         params = {'ticker': ticker, 'datatype': datatype, 'start_date': start_date, 'end_date': end_date,
@@ -367,7 +361,7 @@ class BaseAlgo(ABC):
         else:
             return 0, result['return']['content']
 
-    def load_ticker_cache(self, ticker, datatype, start_date, from_exchange=False):
+    def download_ticker_data(self, ticker, datatype, start_date, from_exchange=False):
         ret_code, df = self.download_historical(ticker=ticker, datatype=datatype, start_date=start_date,
                                                 from_exchange=from_exchange)
 
@@ -376,14 +370,14 @@ class BaseAlgo(ABC):
         else:
             raise Exception(f'Failed to download historical data from Hook due to {df}')
 
-    def load_all_cache(self, start_date, tickers=None):
+    def download_all_data(self, start_date, tickers=None):
 
         tickers = self._trading_universe if tickers is None else tickers
         for dtype in self._datatypes:
             for ticker in tickers:
-                self.load_ticker_cache(ticker=ticker, datatype=dtype, start_date=start_date)
+                self.download_ticker_data(ticker=ticker, datatype=dtype, start_date=start_date)
 
-    def load_ticker_lot_size(self, tickers):
+    def download_ticker_lot_size(self, tickers):
         params = {'tickers': str(tickers)}
 
         result = requests.get(self._hook_ip + '/order/lot_size', params=params).json()
@@ -392,14 +386,14 @@ class BaseAlgo(ABC):
             failed = list(lot_size_df.loc[lot_size_df['lot_size'] == 0].index)
             succeed = list(lot_size_df.loc[lot_size_df['lot_size'] > 0].index)
             for ticker in succeed:
-                self.ticker_lot_size[ticker] = lot_size_df.loc[ticker]['lot_size']
+                self._ticker_lot_size[ticker] = lot_size_df.loc[ticker]['lot_size']
             self._trading_universe = list(set(self._trading_universe).difference(failed))
             self._failed_tickers = list(set(self._failed_tickers).union(failed))
             return succeed, failed
         else:
             raise Exception(f'Failed to request lot size due to {result["return"]["content"]}')
 
-    def add_new_topics(self, tickers):
+    def add_zmq_topics(self, tickers):
         tmp = [f'{self._hook_name}.{x[0]}.{x[1]}' for x in itertools.product(self._datatypes, tickers)]
         self._topics = list(set(self._topics).union(tmp))
         return tmp
@@ -407,10 +401,10 @@ class BaseAlgo(ABC):
     # ------------------------------------------------ [ Trade ] ------------------------------------------
 
     def trade(self, ticker, trade_side, order_type, quantity, price):
-        risk_passed, msg = self.risk_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
+        risk_passed, msg = self.pre_trade_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
         if not risk_passed:
             msg = f'Risk check failed:"{order_type} {quantity} qty of {ticker} @ {price}" due to {msg}'
-            self.logger.info(msg)
+            self._logger.info(msg)
             return 0, msg
 
         trade_url = self._hook_ip + '/order/place'
@@ -425,11 +419,11 @@ class BaseAlgo(ABC):
             # df = df.rename(columns={'code': 'ticker'})
             self.update_positions(df=df)
             msg = f'Placed order: {order_type} {quantity} qty of {ticker} @ {price}'
-            self.logger.info(msg)
+            self._logger.info(msg)
             return 1, msg
         else:
             msg = f'Failed to place trade due to {result["return"]["content"]}'
-            self.logger.info(msg)
+            self._logger.info(msg)
             return 0, msg
 
     def buy_market(self, ticker, quantity):
@@ -444,7 +438,7 @@ class BaseAlgo(ABC):
     def sell_limit(self, ticker, quantity, price):
         return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='NORMAL', price=price)
 
-    def risk_check(self, ticker, quantity, trade_side, price):
+    def pre_trade_check(self, ticker, quantity, trade_side, price):
         trade_sign = -1 if trade_side == 'BUY' else 1
         price = self.positions.loc[ticker]['price'] if price == 0.0 else price
         exp_cash_change = price * quantity * trade_sign
@@ -455,28 +449,28 @@ class BaseAlgo(ABC):
         if self._current_cash + exp_cash_change < 0:
             return 0, f'Not enough cash, current cash:{self._current_cash} , required cash:{-exp_cash_change}'
 
-        if quantity % self.ticker_lot_size[ticker] != 0:
-            return 0, f'Lot size is invalid, should be multiple of {self.ticker_lot_size[ticker]} but got {quantity}'
+        if quantity % self._ticker_lot_size[ticker] != 0:
+            return 0, f'Lot size is invalid, should be multiple of {self._ticker_lot_size[ticker]} but got {quantity}'
 
         return 1, 'Risk check passed'
 
     # ------------------------------------------------ [ Get infos ] ------------------------------------------
-    def get_qty(self, ticker):
+    def get_current_qty(self, ticker):
         return self.positions.loc[ticker]['quantity']
 
-    def get_mv(self, ticker):
+    def get_current_market_value(self, ticker):
         return self.positions.loc[ticker]['market_value']
 
-    def get_price(self, ticker):
+    def get_latest_price(self, ticker):
         return self.positions.loc[ticker]['price']
 
     def get_lot_size(self, ticker):
-        return self.ticker_lot_size[ticker]
+        return self._ticker_lot_size[ticker]
 
-    def cal_max_buy_qty(self, ticker, cash=None, adjust_limit=1.03):
+    def calc_max_buy_qty(self, ticker, cash=None, adjust_limit=1.03):
         cash = self._current_cash if cash is None else cash
         lot_size = self.get_lot_size(ticker)
-        one_hand_size = self.get_lot_size(ticker) * self.get_price(ticker) * adjust_limit
+        one_hand_size = self.get_lot_size(ticker) * self.get_latest_price(ticker) * adjust_limit
         if cash >= one_hand_size:
             max_qty_by_cash = int((cash - cash % one_hand_size) / one_hand_size) * lot_size
             return max_qty_by_cash
@@ -496,13 +490,13 @@ class BaseAlgo(ABC):
     async def get_attributes(self, request):
         return_attributes = dict()
         restricted_attr = (
-            '_trading_universe', 'bars_no', 'logger', '_trading_environment', '_failed_tickers', '_datatypes',
+            '_trading_universe', 'logger', '_trading_environment', '_failed_tickers', '_datatypes',
             '_txn_cost', '_total_txn_cost',
-            '_initial_capital', '_running', '_current_cash', 'pending_orders',
-            'completed_orders', 'positions', 'slippage', 'ticker_lot_size', 'record', '_ip', '_mq_ip', '_hook_ip',
-            '_zmq_context', '_mq_socket', '_topics', '_hook_name', 'cache_path', 'cache',
-            '_per_ticker_max_cache', 'initialized_date', '_sanic', '_sanic_host', '_sanic_port',
-            '_initialized', 'last_candlestick_time')
+            '_initial_capital', '_running', '_current_cash', '_pending_orders',
+            '_completed_orders', 'positions', 'slippage', '_ticker_lot_size', 'record', '_ip', '_mq_ip', '_hook_ip',
+            '_zmq_context', '_mq_socket', '_topics', '_hook_name', '_cache',
+            '_cache_rows', '_initialized_date', '_sanic', '_sanic_host', '_sanic_port', '_prefill_period',
+            '_initialized', '_last_update', '_bars_window')
         for name, value in self.__dict__.items():
             if (type(value) in (list, str, float, int)) and (name not in restricted_attr):
                 return_attributes[name] = value
@@ -510,8 +504,8 @@ class BaseAlgo(ABC):
 
     async def get_summary(self, request):
         portfolio_value = sum(self.positions['market_value']) + self._current_cash
-        trades = self.completed_orders.shape[0]
-        days_since_deployment = max(int((datetime.datetime.today() - self.initialized_date).days), 1)
+        trades = self._completed_orders.shape[0]
+        days_since_deployment = max(int((datetime.datetime.today() - self._initialized_date).days), 1)
 
         return response.json({'ret_code': 1, 'return': {'content': {'name': self.name,
                                                                     'benchmark': self.benchmark,
@@ -522,7 +516,7 @@ class BaseAlgo(ABC):
                                                                     'cash': self._current_cash,
                                                                     'n_trades': trades,
                                                                     'txn_cost_total': self._total_txn_cost,
-                                                                    'initialized_date': self.initialized_date.strftime(
+                                                                    'initialized_date': self._initialized_date.strftime(
                                                                         '%Y-%m-%d'),
                                                                     'days_since_deployment': days_since_deployment, }}})
 
@@ -562,8 +556,8 @@ class BaseAlgo(ABC):
     async def get_pending_orders(self, request):
         start_date = request.args.get('start_date')
 
-        if len(self.pending_orders) > 0:
-            pending_orders = pd.concat(self.pending_orders.values(), axis=1)
+        if len(self._pending_orders) > 0:
+            pending_orders = pd.concat(self._pending_orders.values(), axis=1)
 
             if start_date is not None:
                 pending_orders = pending_orders.loc[pending_orders['updated_time'] >= start_date]
@@ -575,11 +569,11 @@ class BaseAlgo(ABC):
     async def get_completed_orders(self, request):
         start_date = request.args.get('start_date')
 
-        if self.completed_orders.shape[0] > 0:
+        if self._completed_orders.shape[0] > 0:
             if start_date is not None:
-                completed_orders = self.completed_orders.loc[self.completed_orders['updated_time'] >= start_date]
+                completed_orders = self._completed_orders.loc[self._completed_orders['updated_time'] >= start_date]
             else:
-                completed_orders = self.completed_orders
+                completed_orders = self._completed_orders
         else:
             completed_orders = pd.DataFrame()
         return response.json(
@@ -589,20 +583,20 @@ class BaseAlgo(ABC):
         if len(tickers) > 0:
             tickers = pd.unique(tickers).tolist()
             self._trading_universe = list(set(self._trading_universe).union(tickers))
-            succeed, failed = self.load_ticker_lot_size(tickers=tickers)
+            succeed, failed = self.download_ticker_lot_size(tickers=tickers)
 
-            self.load_all_cache(tickers=succeed, start_date=period_to_start_date(prefill_period))
-            new_topics = self.add_new_topics(tickers=succeed)
+            self.download_all_data(tickers=succeed, start_date=period_to_start_date(prefill_period))
+            new_topics = self.add_zmq_topics(tickers=succeed)
 
             for ticker in succeed:
                 self.positions.loc[ticker] = [0.0, 0.0, 0.0]
 
             for topic in new_topics:
                 self._mq_socket.subscribe(topic)
-                self.logger.debug(f'ZMQ subscribed to {topic}')
+                self._logger.debug(f'ZMQ subscribed to {topic}')
 
             for failed_ticker in failed:
-                self.logger.debug(f'Failed to subscribe {failed_ticker}')
+                self._logger.debug(f'Failed to subscribe {failed_ticker}')
 
     async def web_subscribe_tickers(self, request):
         tickers = eval(request.args.get('tickers'))
@@ -619,7 +613,7 @@ class BaseAlgo(ABC):
         tickers = eval(request.args.get('tickers'))
         tickers = list(set(tickers).intersection(self._trading_universe))
 
-        new_topics = self.add_new_topics(tickers=tickers)
+        new_topics = self.add_zmq_topics(tickers=tickers)
         for topic in new_topics:
             self._mq_socket.unsubscribe(topic)
         self._topics = list(set(self._topics).difference(new_topics))
@@ -653,19 +647,19 @@ class BaseAlgo(ABC):
 
 
 class CandlestickStrategy(BaseAlgo):
-    def __init__(self, name: str, bars_no: int, benchmark: str = 'HSI'):
+    def __init__(self, name: str, bars_window: int, benchmark: str = 'HSI'):
         super().__init__(name=name, benchmark=benchmark)
-        self.last_candlestick_time = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
-        self.bars_no = bars_no
+        self._last_update = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
+        self._bars_window = bars_window
 
     def determine_trigger(self, datatype, ticker, df):
         if 'K_' in datatype:
             datetime = df['datetime'].iloc[-1]
-            last_df = self.last_candlestick_time[ticker][datatype]
+            last_df = self._last_update[ticker][datatype]
             trigger_strat = (last_df is not None) and (datetime != last_df['datetime'].iloc[-1])
-            self.last_candlestick_time[ticker][datatype] = df
+            self._last_update[ticker][datatype] = df
             return trigger_strat, (
-                datatype, ticker, self.get_data(datatype=datatype, ticker=ticker, n_rows=self.bars_no + 1)[:-1])
+                datatype, ticker, self.get_data(datatype=datatype, ticker=ticker, n_rows=self._bars_window + 1)[:-1])
         else:
             return True, (datatype, ticker, df)
 
@@ -688,13 +682,13 @@ class Backtest(BaseAlgo):
     def initialize(self, initial_capital: float,
                    hook_ip: str,
                    trading_universe: list, datatypes: list,
-                   txn_cost: float = 30, per_ticker_max_cache: int = 3000,
+                   txn_cost: float = 30, cache_rows: int = 3000,
                    test_mq_con=False, spread: float = 0.2 / 100, **kwargs):
 
         super().initialize(initial_capital=initial_capital, mq_ip='', hook_ip=hook_ip,
                            trading_environment='BACKTEST',
                            trading_universe=trading_universe,
-                           txn_cost=txn_cost, per_ticker_max_cache=per_ticker_max_cache,
+                           txn_cost=txn_cost, cache_rows=cache_rows,
                            test_mq_con=test_mq_con, spread=spread,
                            datatypes=datatypes)
         self._spread = spread
@@ -702,17 +696,17 @@ class Backtest(BaseAlgo):
 
     def backtest(self, start_date, end_date):
         if not self._initialized:
-            self.logger.debug('Algo not initialized')
+            self._logger.debug('Algo not initialized')
             return
 
-        self.logger.debug(f'Backtesting Starts...')
+        self._logger.debug(f'Backtesting Starts...')
 
         # No need to load ticker cache
-        succeed, failed = self.load_ticker_lot_size(tickers=self._trading_universe)
+        succeed, failed = self.download_ticker_lot_size(tickers=self._trading_universe)
         for ticker in succeed:
             self.positions.loc[ticker] = [0.0, 0.0, 0.0]
 
-        self.logger.debug(f'Loading Date from MySQL DB...')
+        self._logger.debug(f'Loading Date from MySQL DB...')
         backtest_df = pd.DataFrame()
         for tk in self._trading_universe:
             for dtype in self._datatypes:
@@ -720,7 +714,7 @@ class Backtest(BaseAlgo):
                                                         end_date=end_date)
                 if ret_code != 1 or df.shape[0] == 0:
                     msg = f'Failed to download data {dtype} {tk} from Hook, please ensure data is in MySQL Db'
-                    self.logger.error(msg)
+                    self._logger.error(msg)
                     raise Exception(msg)
                 else:
                     df['datatype'] = dtype
@@ -731,15 +725,15 @@ class Backtest(BaseAlgo):
                 if df.shape[0] > 0:
                     backtest_df = backtest_df.append(df)
                     self.add_cache(datatype=dtype, df=filler, ticker=tk)
-                    self.logger.debug(
+                    self._logger.debug(
                         f'Backtesting {tk} from {df["datetime"].iloc[0]}')
                 else:
-                    self.logger.warn(f'Not Enough bars to backtest {dtype}.{tk}')
+                    self._logger.warn(f'Not Enough bars to backtest {dtype}.{tk}')
                     continue
 
         backtest_df = backtest_df.sort_values(by=['datetime', 'datatype', 'ticker'], ascending=True)
 
-        self.logger.debug(f'Loaded Data, backtesting starts...')
+        self._logger.debug(f'Loaded Data, backtesting starts...')
 
         async def _backtest():
             self._order_queue = list()
@@ -787,14 +781,14 @@ class Backtest(BaseAlgo):
                 if trigger_strat:
                     await self.trigger_strat(datatype=tgr_dtype, ticker=tgr_ticker, df=tgr_df)
 
-            self.logger.debug('Backtesting Completed! Call report() method to see backtesting result!')
+            self._logger.debug('Backtesting Completed! Call report() method to see backtesting result!')
 
         asyncio.run(_backtest())
 
     def trade(self, ticker, trade_side, order_type, quantity, price):
-        risk_passed, msg = self.risk_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
+        risk_passed, msg = self.pre_trade_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
         if not risk_passed:
-            self.logger.warn(
+            self._logger.warn(
                 f'Risk check for order "{trade_side} {quantity} qty of {ticker} @ {price}" did not pass, reasons: {msg}')
             backtest_trade = {'order_id': hash(random.random()), 'ticker': ticker, 'price': 0,
                               'trd_side': trade_side, 'order_status': 'FAILED',
@@ -822,22 +816,22 @@ class Backtest(BaseAlgo):
     def buy_market(self, ticker, quantity):
         # Buy at current close
         return self.trade(ticker=ticker, quantity=quantity, trade_side='BUY', order_type='MARKET',
-                          price=self.get_price(ticker))
+                          price=self.get_latest_price(ticker))
 
     def sell_market(self, ticker, quantity):
         # Sell at current close
         return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='MARKET',
-                          price=self.get_price(ticker))
+                          price=self.get_latest_price(ticker))
 
     def buy_limit(self, ticker, quantity, price):
         # Buy at current close
         return self.trade(ticker=ticker, quantity=quantity, trade_side='BUY', order_type='NORMAL',
-                          price=self.get_price(ticker))
+                          price=self.get_latest_price(ticker))
 
     def sell_limit(self, ticker, quantity, price):
         # Sell at current close
         return self.trade(ticker=ticker, quantity=quantity, trade_side='SELL', order_type='NORMAL',
-                          price=self.get_price(ticker))
+                          price=self.get_latest_price(ticker))
 
     def buy_next_open(self, datatype, ticker, quantity):
         # Buy at next open of that datatype
@@ -853,9 +847,9 @@ class Backtest(BaseAlgo):
 
     # ------------------------------------------------ [ Report ] ------------------------------------------
     def plot_ticker_trades(self, datatype, ticker):
-        orders_df = self.completed_orders.loc[self.completed_orders.ticker == ticker].rename(
+        orders_df = self._completed_orders.loc[self._completed_orders.ticker == ticker].rename(
             columns={'created_time': 'datetime'})
-        ticker_df = self.cache[datatype][ticker]
+        ticker_df = self._cache[datatype][ticker]
         ticker_df = ticker_df.merge(orders_df[['datetime', 'trd_side']], how='left', on=['datetime'])
         ticker_df = ticker_df.fillna(0)
         ticker_df['buy_pt'] = [1 if 'BUY' in str(x) else None for x in ticker_df['trd_side']]

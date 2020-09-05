@@ -1,11 +1,11 @@
-from FutuAlgo.Algo import CandlestickStrategy
+from FutuAlgo.algo import CandlestickStrategy
 import datetime
 import pandas as pd
 
 
 class SMACrossover(CandlestickStrategy):
     def __init__(self, short, long):
-        super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_no=long+1)
+        super().__init__(name='SMA Crossover ({}, {})'.format(short, long), bars_window=long + 1)
         self.short = short
         self.long = long
         self.all_ticks = pd.DataFrame()
@@ -23,21 +23,21 @@ class SMACrossover(CandlestickStrategy):
             sma_long_last = df['SMA_long'].iloc[-2]
             sma_long_cur = df['SMA_long'].iloc[-1]
 
-            if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_qty(ticker) == 0):
+            if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_current_qty(ticker) == 0):
                 df.to_csv(f'Trade_Recon/BUY_{ticker.split()[1]}_{df["datetime"].iloc[-1]}.csv')
                 self.buy_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                               price=self.get_price(ticker=ticker)+1)
+                               price=self.get_latest_price(ticker=ticker) + 1)
 
 
-            elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_qty(ticker) > 0):
+            elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_current_qty(ticker) > 0):
                 df.to_csv(f'Trade_Recon/SELL_{ticker.split()[1]}_{df["datetime"].iloc[-1]}.csv')
                 self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
-                                      price=self.get_price(ticker=ticker)-1)
+                                price=self.get_latest_price(ticker=ticker) - 1)
         else:
             pass
 
     async def on_order_update(self, order_id, df):
-        self.logger.info(
+        self._logger.info(
             f'{df["order_status"].iloc[-1]} {df["order_type"].iloc[-1]} order to {df["trd_side"].iloc[-1]} {df["dealt_qty"].iloc[-1]}/{df["qty"].iloc[-1]} shares of {df["ticker"].iloc[-1]} @ {df["price"].iloc[-1]}, orderID: {df["order_id"].iloc[-1]}')
 
     async def on_orderbook(self, ticker, df):

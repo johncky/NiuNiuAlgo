@@ -1,5 +1,5 @@
-from FutuAlgo.Algo import BaseAlgo, CandlestickStrategy, Backtest
-from FutuAlgo.FutuHook import FutuHook
+from FutuAlgo.algo import BaseAlgo, CandlestickStrategy, Backtest
+from FutuAlgo.hook import FutuHook
 from FutuAlgo.Webapp.app import WebApp
 
 

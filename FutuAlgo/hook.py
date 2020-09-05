@@ -1,54 +1,10 @@
 from queue import Queue
-import asyncio
 from futu import *
-from sanic import Sanic
-from sanic import response
-import zmq
-import zmq.asyncio
-import pickle
-import aiomysql
+from sanic import Sanic, response
+import zmq, zmq.asyncio, pickle, aiomysql, collections, asyncio
 import numpy as np
-from FutuAlgo import Logger
-import collections
-
-supported_dtypes = ('K_DAY', 'K_1M', 'K_3M', 'K_5M', 'K_15M', 'QUOTE', 'ORDER_UPDATE')
-
-schemas_sql = {'K': """CREATE TABLE IF NOT EXISTS `{}`.`FUTU_{}` (
-  `ticker` VARCHAR(40) NOT NULL,
-  `datetime` DATETIME NOT NULL,
-  `open` FLOAT NULL,
-  `high` FLOAT NULL,
-  `low` FLOAT NULL,
-  `close` FLOAT NULL,
-  `volume` FLOAT NULL,
-  `turnover` FLOAT NULL,
-  PRIMARY KEY (`ticker`, `datetime`));
-""",
-               'ORDER_UPDATE': """CREATE TABLE IF NOT EXISTS `{}`.`FUTU_ORDER_UPDATE` (
-  `trd_side` VARCHAR(10) NULL,
-  `order_type` VARCHAR(20) NULL,
-  `order_id` VARCHAR(50) NOT NULL,
-  `ticker` VARCHAR(40) NULL,
-  `stock_name` VARCHAR(50) NULL,
-  `qty` FLOAT NULL,
-  `price` FLOAT NULL,
-  `create_time` DATETIME NULL,
-  `updated_time` DATETIME NULL,
-  `dealt_qty` FLOAT NULL,
-  `dealt_avg_price` FLOAT NULL,
-  `trd_env` VARCHAR(40) NULL,
-  `order_status` VARCHAR(40) NULL,
-  `trd_market` VARCHAR(40) NULL,
-  `last_err_msg` VARCHAR(200) NULL,
-  `remark` VARCHAR(200) NULL,
-  PRIMARY KEY (`order_id`));""",
-               'QUOTE': """CREATE TABLE IF NOT EXISTS `{}`.`FUTU_QUOTE` (
-                 `ticker` VARCHAR(40) NOT NULL,
-                 `datetime` DATETIME NOT NULL,
-                 `quote` FLOAT NULL,
-                 `volume` FLOAT NULL,
-                 PRIMARY KEY (`ticker`, `datetime`));"""
-               }
+from FutuAlgo import logger
+from config import *
 
 
 class FutuKlineHandler(CurKlineHandlerBase):
@@ -102,35 +58,23 @@ class FutuOrderUpdateHandler(TradeOrderHandlerBase):
 
 class FutuHook():
     def __init__(self, log_path='.', db_save_freq=30 * 60):
-        # Get Environment Variables
-        self.SANIC_HOST = os.getenv('SANIC_HOST')
-        self.SANIC_PORT = os.getenv('SANIC_PORT')
-        self.FUTU_TRADE_PWD = os.getenv('FUTU_TRADE_PWD')
-        self.FUTU_HOST = os.getenv('FUTU_HOST')
-        self.FUTU_PORT = int(os.getenv('FUTU_PORT'))
-        self.ZMQ_PORT = os.getenv('ZMQ_PORT')
-        self.MYSQL_DB = os.getenv('MYSQL_DB')
-        self.MYSQL_HOST = os.getenv('MYSQL_HOST')
-        self.MYSQL_USER = os.getenv('MYSQL_USER')
-        self.MYSQL_PWD = os.getenv('MYSQL_PWD')
-
         # Queue
         self.queue = Queue()
 
         # Futu Context and Trade Context
         SysConfig.set_all_thread_daemon(True)
-        self.quote_context = OpenQuoteContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+        self.quote_context = OpenQuoteContext(host=FUTU_HOST, port=FUTU_PORT)
 
         self.trade_contexts = dict()
         for mkt in ('HK', 'US', 'CN'):
-            self.trade_contexts[mkt] = OpenHKTradeContext(host=self.FUTU_HOST, port=self.FUTU_PORT)
+            self.trade_contexts[mkt] = OpenHKTradeContext(host=FUTU_HOST, port=FUTU_PORT)
             self.trade_contexts[mkt].set_handler(FutuOrderUpdateHandler(queue=self.queue))
 
         self.quote_context.set_handler(FutuQuoteHandler(queue=self.queue))
         self.quote_context.set_handler(FutuKlineHandler(queue=self.queue))
 
         # Logger
-        self.logger = Logger.RootLogger('FutuHook', file_path=log_path)
+        self.logger = logger.RootLogger('FutuHook', file_path=log_path)
         self.logger.debug(f'{self.unlock_trade()}')
 
         # Create a dictionary for storing temporary dfs, which will be saved to MySQL later
@@ -141,11 +85,11 @@ class FutuHook():
         # ZMQ Publish and Pair sockets
         self.zmq_context = zmq.asyncio.Context()
         self.mq_socket = self.zmq_context.socket(zmq.PUB)
-        self.mq_socket.bind(f"tcp://0.0.0.0:{self.ZMQ_PORT}")
+        self.mq_socket.bind(f"tcp://0.0.0.0:{ZMQ_PORT}")
         self.hello_socket = self.zmq_context.socket(zmq.PAIR)
-        self.hello_socket.bind(f"tcp://0.0.0.0:{int(self.ZMQ_PORT) + 1}")
-        self.logger.debug(f'ZMQ publisher binded @ tcp://0.0.0.0:{self.ZMQ_PORT}')
-        self.logger.debug(f'ZMQ pair binded @ tcp://0.0.0.0:{int(self.ZMQ_PORT) + 1}')
+        self.hello_socket.bind(f"tcp://0.0.0.0:{int(ZMQ_PORT) + 1}")
+        self.logger.debug(f'ZMQ publisher binded @ tcp://0.0.0.0:{ZMQ_PORT}')
+        self.logger.debug(f'ZMQ pair binded @ tcp://0.0.0.0:{int(ZMQ_PORT) + 1}')
 
         # Sanic App
         self.app = Sanic('FutuHook')
@@ -164,9 +108,9 @@ class FutuHook():
         return return_content
 
     def unlock_trade(self):
-        ret_code_hk, data = self.trade_contexts['HK'].unlock_trade(self.FUTU_TRADE_PWD)
-        ret_code_us, data = self.trade_contexts['US'].unlock_trade(self.FUTU_TRADE_PWD)
-        ret_code_cn, data = self.trade_contexts['CN'].unlock_trade(self.FUTU_TRADE_PWD)
+        ret_code_hk, data = self.trade_contexts['HK'].unlock_trade(FUTU_TRADE_PWD)
+        ret_code_us, data = self.trade_contexts['US'].unlock_trade(FUTU_TRADE_PWD)
+        ret_code_cn, data = self.trade_contexts['CN'].unlock_trade(FUTU_TRADE_PWD)
 
         if RET_ERROR in (ret_code_hk, ret_code_cn, ret_code_us):
             raise Exception("FutuHook: Trade Unlocked Failed")
@@ -216,7 +160,7 @@ class FutuHook():
             # Sanic app
             tasks = list()
             self.app_add_route(app=self.app)
-            web_server = self.app.create_server(return_asyncio_server=True, host=self.SANIC_HOST, port=self.SANIC_PORT)
+            web_server = self.app.create_server(return_asyncio_server=True, host=SANIC_HOST, port=SANIC_PORT)
             tasks.append(web_server)
             tasks.append(self.publish())
             tasks.append(self.connection_entry())
@@ -237,21 +181,27 @@ class FutuHook():
     async def db_create_schemas(self):
         conn = await self.db_get_conn()
         cursor = await conn.cursor()
+        pkg_path = os.path.dirname(os.path.realpath(__file__))
+        fd = open(pkg_path + '\\schemas.sql', 'r')
+        sql = fd.read()
+        fd.close()
+        await cursor.execute(sql)
+        await conn.commit()
 
-        for dtype in supported_dtypes:
-            if 'K_' in dtype:
-                try:
-                    await cursor.execute(schemas_sql['K'].format(self.MYSQL_DB, dtype))
-                    await conn.commit()
-                except Exception as e:
-                    self.logger.error(f'MySQL: failed to create table {dtype} due to {str(e)}')
-
-            elif (dtype == 'ORDER_UPDATE') or (dtype == 'QUOTE'):
-                try:
-                    await cursor.execute(schemas_sql[dtype].format(self.MYSQL_DB))
-                    await conn.commit()
-                except Exception as e:
-                    self.logger.error(f'MySQL: failed to create table {dtype}, reason: {str(e)}')
+        # for dtype in supported_dtypes:
+        #     if 'K_' in dtype:
+        #         try:
+        #             await cursor.execute(schemas_sql['K'].format(self.MYSQL_DB, dtype))
+        #             await conn.commit()
+        #         except Exception as e:
+        #             self.logger.error(f'MySQL: failed to create table {dtype} due to {str(e)}')
+        #
+        #     elif (dtype == 'ORDER_UPDATE') or (dtype == 'QUOTE'):
+        #         try:
+        #             await cursor.execute(schemas_sql[dtype].format(self.MYSQL_DB))
+        #             await conn.commit()
+        #         except Exception as e:
+        #             self.logger.error(f'MySQL: failed to create table {dtype}, reason: {str(e)}')
 
         conn.close()
 
@@ -271,7 +221,7 @@ class FutuHook():
         else:
             return
         self.logger.debug(f'MySQL: inserting data {datatype}')
-        return await self.insert_df(db=self.MYSQL_DB, table=table, pk_positions=pk_positions, df=df)
+        return await self.insert_df(db=MYSQL_DB, table=table, pk_positions=pk_positions, df=df)
 
     async def insert_df(self, db, table, pk_positions, df):
         conn = await self.db_get_conn()
@@ -326,7 +276,7 @@ class FutuHook():
     async def db_get_historicals(self, datatype, ticker, start_date: str, end_date: str = None):
         # end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d') if end_date is None else end_date
 
-        sql = f"""SELECT * FROM {self.MYSQL_DB}.FUTU_{datatype} where ticker = '{ticker}'"""
+        sql = f"""SELECT * FROM {MYSQL_DB}.FUTU_{datatype} where ticker = '{ticker}'"""
         if start_date or end_date:
             sql += """ and """
             if start_date and end_date:
@@ -349,10 +299,10 @@ class FutuHook():
 
     async def db_get_conn(self):
         try:
-            return await aiomysql.connect(host=str(self.MYSQL_HOST),
-                                          user=str(self.MYSQL_USER),
-                                          password=str(self.MYSQL_PWD),
-                                          db=str(self.MYSQL_DB),
+            return await aiomysql.connect(host=str(MYSQL_HOST),
+                                          user=str(MYSQL_USER),
+                                          password=str(MYSQL_PWD),
+                                          db=str(MYSQL_DB),
                                           charset='utf8mb4')
         except Exception as e:
             self.logger.error(f'MySQL: failed to get conn due to {str(e)}')
@@ -459,7 +409,7 @@ class FutuHook():
         try:
             datatype = request.args.get('datatype').upper()
             assert datatype in supported_dtypes, f"Invalid data type {datatype}"
-            sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(self.MYSQL_DB, datatype)
+            sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(MYSQL_DB, datatype)
             conn = await self.db_get_conn()
             cur = await conn.cursor()
             await cur.execute(sql)
