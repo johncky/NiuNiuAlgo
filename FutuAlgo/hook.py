@@ -5,6 +5,7 @@ import zmq, zmq.asyncio, pickle, aiomysql, collections, asyncio
 import numpy as np
 from FutuAlgo import logger
 from config import *
+from tools import web_expt
 
 
 class FutuKlineHandler(CurKlineHandlerBase):
@@ -187,22 +188,6 @@ class FutuHook():
         fd.close()
         await cursor.execute(sql)
         await conn.commit()
-
-        # for dtype in supported_dtypes:
-        #     if 'K_' in dtype:
-        #         try:
-        #             await cursor.execute(schemas_sql['K'].format(self.MYSQL_DB, dtype))
-        #             await conn.commit()
-        #         except Exception as e:
-        #             self.logger.error(f'MySQL: failed to create table {dtype} due to {str(e)}')
-        #
-        #     elif (dtype == 'ORDER_UPDATE') or (dtype == 'QUOTE'):
-        #         try:
-        #             await cursor.execute(schemas_sql[dtype].format(self.MYSQL_DB))
-        #             await conn.commit()
-        #         except Exception as e:
-        #             self.logger.error(f'MySQL: failed to create table {dtype}, reason: {str(e)}')
-
         conn.close()
 
     async def insert_data(self, datatype, df):
@@ -310,38 +295,37 @@ class FutuHook():
     # -----------------------------[ Sanic ] -------------------------------------------
 
     # GET: None
+    @web_expt()
     async def get_subscriptions(self, request):
-        try:
-            ret_code, sub = self.quote_context.query_subscription()
-            data = {'ret_code': 1 if ret_code != RET_ERROR else 0, 'return': {'content': sub}}
-            return response.json(data)
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        ret_code, sub = self.quote_context.query_subscription()
+        data = {'ret_code': 1 if ret_code != RET_ERROR else 0, 'return': {'content': sub}}
+        return response.json(data)
+
 
     # POST: method, datatypes, tickers
+    @web_expt()
     async def set_subscriptions(self, request):
-        try:
-            method = request.form.get('method').upper()
-            dtypes = eval(request.form.get('datatypes'))
-            tickers = eval(request.form.get('tickers'))
-            if method == 'SUBSCRIBE':
-                ret_code, df = self.subscribe(tickers=tickers, datatypes=dtypes)
-                if ret_code == RET_OK:
-                    ret_code, sub = self.quote_context.query_subscription()
-                    data = {'ret_code': 1, 'return': {'content': sub}}
-                else:
-                    data = {'ret_code': 1, 'return': {'content': df}}
-                return response.json(data)
-            elif method == 'UNSUBSCRIBE':
-                ret_code, df = self.unsubscribe(tickers=tickers, datatypes=dtypes)
-                if ret_code == RET_OK:
-                    ret_code, sub = self.quote_context.query_subscription()
-                    data = {'ret_code': 1, 'return': {'content': sub}}
-                else:
-                    data = {'ret_code': 1, 'return': {'content': df}}
-                return response.json(data)
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        method = request.form.get('method').upper()
+        dtypes = eval(request.form.get('datatypes'))
+        tickers = eval(request.form.get('tickers'))
+        if method == 'SUBSCRIBE':
+            ret_code, df = self.subscribe(tickers=tickers, datatypes=dtypes)
+            if ret_code == RET_OK:
+                ret_code, sub = self.quote_context.query_subscription()
+                data = {'ret_code': 1, 'return': {'content': sub}}
+            else:
+                data = {'ret_code': 1, 'return': {'content': df}}
+            return response.json(data)
+        elif method == 'UNSUBSCRIBE':
+            ret_code, df = self.unsubscribe(tickers=tickers, datatypes=dtypes)
+            if ret_code == RET_OK:
+                ret_code, sub = self.quote_context.query_subscription()
+                data = {'ret_code': 1, 'return': {'content': sub}}
+            else:
+                data = {'ret_code': 1, 'return': {'content': df}}
+            return response.json(data)
+        else:
+            raise Exception(f'Invalid method {method}')
 
     # GET: datatype, ticker, start_date, end_date, from_exchange
     # async def download_historicals(self, request):
@@ -367,155 +351,150 @@ class FutuHook():
     #         return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     # GET: datatype, ticker, start_date, end_date, from_exchange
+    @web_expt()
     async def get_historicals(self, request):
-        try:
-            datatype = request.args.get('datatype')
-            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
-            from_exchange = True if request.args.get('from_exchange').upper() == 'TRUE' else False
-            ticker = request.args.get('ticker')
-            start_date = request.args.get('start_date')
-            end_date = request.args.get('end_date')
+        datatype = request.args.get('datatype')
+        assert datatype in supported_dtypes, f"Invalid data type {datatype}"
+        from_exchange = True if request.args.get('from_exchange').upper() == 'TRUE' else False
+        ticker = request.args.get('ticker')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
 
-            if from_exchange:
-                result = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
-                                                                  start=start_date,
-                                                                  end=end_date, max_count=None)
-                ret_code, df = result[0], result[1]
-                if ret_code == -1:
-                    return response.json({'ret_code': 0, 'return': {'content': df}})
+        if from_exchange:
+            result = self.quote_context.request_history_kline(code=ticker, ktype=datatype,
+                                                              start=start_date,
+                                                              end=end_date, max_count=None)
+            ret_code, df = result[0], result[1]
+            if ret_code == -1:
+                return response.json({'ret_code': 0, 'return': {'content': df}})
 
-                df = df[['code', 'time_key', 'open', 'high', 'low', 'close', 'volume', 'turnover']].rename(
-                    columns={'time_key': 'datetime', 'code': 'ticker'})
+            df = df[['code', 'time_key', 'open', 'high', 'low', 'close', 'volume', 'turnover']].rename(
+                columns={'time_key': 'datetime', 'code': 'ticker'})
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
+
+        else:
+            df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
+                                               end_date=end_date)
+            if self.tmp_storage[datatype].shape[0] != 0:
+                df = df.append(
+                    self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
+            if df.shape[0] != 0:
                 df['datetime'] = pd.to_datetime(df['datetime'])
-                return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
+                df = df.drop_duplicates(
+                    subset=['datetime', 'ticker'], keep='last').sort_values(by='datetime', axis=0)
+            df.reset_index(inplace=True, drop=True)
+            return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
 
-            else:
-                df = await self.db_get_historicals(datatype=datatype, ticker=ticker, start_date=start_date,
-                                                   end_date=end_date)
-                if self.tmp_storage[datatype].shape[0] != 0:
-                    df = df.append(
-                        self.tmp_storage[datatype].loc[self.tmp_storage[datatype]['ticker'] == ticker])
-                if df.shape[0] != 0:
-                    df['datetime'] = pd.to_datetime(df['datetime'])
-                    df = df.drop_duplicates(
-                        subset=['datetime', 'ticker'], keep='last').sort_values(by='datetime', axis=0)
-                df.reset_index(inplace=True, drop=True)
-                return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     # GET: datatype
+    @web_expt()
     async def db_get_last_update_time(self, request):
-        try:
-            datatype = request.args.get('datatype').upper()
-            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
-            sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(MYSQL_DB, datatype)
-            conn = await self.db_get_conn()
-            cur = await conn.cursor()
-            await cur.execute(sql)
-            df = pd.DataFrame.from_records(list(await cur.fetchall()))
-            if df.shape[0] > 0:
-                column_names = [i[0] for i in cur.description]
-                df.columns = column_names
-            conn.close()
-            if df.shape[0] == 0:
-                return response.json({'ret_code': 1, 'return': {'content': 'DB is empty'}})
-            else:
-                df['max(datetime)'] = [x.strftime("%Y-%m-%d %H:%M:%S") for x in df['max(datetime)']]
-                df = df.set_index('ticker')['max(datetime)'].to_dict()
-                return response.json({'ret_code': 1, 'return': {'content': df}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        datatype = request.args.get('datatype').upper()
+        assert datatype in supported_dtypes, f"Invalid data type {datatype}"
+        sql = """ Select ticker, max(datetime) from {}.FUTU_{} group by ticker""".format(MYSQL_DB, datatype)
+        conn = await self.db_get_conn()
+        cur = await conn.cursor()
+        await cur.execute(sql)
+        df = pd.DataFrame.from_records(list(await cur.fetchall()))
+        if df.shape[0] > 0:
+            column_names = [i[0] for i in cur.description]
+            df.columns = column_names
+        conn.close()
+        if df.shape[0] == 0:
+            return response.json({'ret_code': 1, 'return': {'content': 'DB is empty'}})
+        else:
+            df['max(datetime)'] = [x.strftime("%Y-%m-%d %H:%M:%S") for x in df['max(datetime)']]
+            df = df.set_index('ticker')['max(datetime)'].to_dict()
+            return response.json({'ret_code': 1, 'return': {'content': df}})
+
 
     # POST: ticker, trade_side, order_type, trade_environment, quantity, price
+    @web_expt()
     async def place_order(self, request):
-        try:
-            trade_side = str(request.form.get('trade_side')).upper()
-            ticker = request.form.get('ticker')
-            market = ticker.split('.')[0]
-            assert market in ('HK', 'US', 'CN'), f"Invalid market '{market}'"
-            order_type = str(request.form.get('order_type')).upper()
-            assert order_type in ('ABSOLUTE_LIMIT', 'MARKET', 'NORMAL'), f"Invalid order type '{order_type}'"
-            assert trade_side in ('BUY', 'SELL', 'BUY_BACK', 'SELL_SHORT'), f"Invalid trade side '{trade_side}'"
-            trade_environment = str(request.form.get('trade_environment')).upper()
-            assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
-            assert ticker is not None, "ticker cannot be empty"
-            ticker = str(ticker).upper()
-            quantity = request.form.get('quantity')
-            assert quantity is not None, 'quantity cannot be empty'
-            quantity = int(quantity)
-            if order_type == 'MARKET':
-                ret_code, df = self.trade_contexts[market].place_order(price=0.0, qty=abs(quantity),
-                                                                       code=ticker, order_type=order_type,
-                                                                       trd_env=trade_environment, trd_side=trade_side)
-                price = 'MARKET'
-            else:
-                price = request.form.get('price')
-                assert price is not None, 'price cannot be empty'
-                price = float(price)
-                adjust_limit = request.form.get('adjust_limit')
-                adjust_limit = 0.0 if adjust_limit is None else float(adjust_limit)
-                ret_code, df = self.trade_contexts[market].place_order(price=price, qty=abs(quantity),
-                                                                       code=ticker, order_type=order_type,
-                                                                       trd_env=trade_environment, trd_side=trade_side,
-                                                                       adjust_limit=adjust_limit)
-            if ret_code == RET_OK:
-                order_id = df['order_id'].iloc[0]
-                df = df.rename(columns={'code': 'ticker'})
-                self.logger.info(
-                    f'ORDER: Placed order to buy {quantity} shares of {ticker} @ {price}, order_id: {order_id}')
-                return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
-            else:
-                self.logger.info(
-                    f'ORDER: Failed to buy {quantity} shares of {ticker} @ {price}, reason: {df}')
-                return response.json({'ret_code': 0, 'return': {'content': df}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        trade_side = str(request.form.get('trade_side')).upper()
+        ticker = request.form.get('ticker')
+        market = ticker.split('.')[0]
+        assert market in ('HK', 'US', 'CN'), f"Invalid market '{market}'"
+        order_type = str(request.form.get('order_type')).upper()
+        assert order_type in ('ABSOLUTE_LIMIT', 'MARKET', 'NORMAL'), f"Invalid order type '{order_type}'"
+        assert trade_side in ('BUY', 'SELL', 'BUY_BACK', 'SELL_SHORT'), f"Invalid trade side '{trade_side}'"
+        trade_environment = str(request.form.get('trade_environment')).upper()
+        assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
+        assert ticker is not None, "ticker cannot be empty"
+        ticker = str(ticker).upper()
+        quantity = request.form.get('quantity')
+        assert quantity is not None, 'quantity cannot be empty'
+        quantity = int(quantity)
+        if order_type == 'MARKET':
+            ret_code, df = self.trade_contexts[market].place_order(price=0.0, qty=abs(quantity),
+                                                                   code=ticker, order_type=order_type,
+                                                                   trd_env=trade_environment, trd_side=trade_side)
+            price = 'MARKET'
+        else:
+            price = request.form.get('price')
+            assert price is not None, 'price cannot be empty'
+            price = float(price)
+            adjust_limit = request.form.get('adjust_limit')
+            adjust_limit = 0.0 if adjust_limit is None else float(adjust_limit)
+            ret_code, df = self.trade_contexts[market].place_order(price=price, qty=abs(quantity),
+                                                                   code=ticker, order_type=order_type,
+                                                                   trd_env=trade_environment, trd_side=trade_side,
+                                                                   adjust_limit=adjust_limit)
+        if ret_code == RET_OK:
+            order_id = df['order_id'].iloc[0]
+            df = df.rename(columns={'code': 'ticker'})
+            self.logger.info(
+                f'ORDER: Placed order to buy {quantity} shares of {ticker} @ {price}, order_id: {order_id}')
+            return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
+        else:
+            self.logger.info(
+                f'ORDER: Failed to buy {quantity} shares of {ticker} @ {price}, reason: {df}')
+            return response.json({'ret_code': 0, 'return': {'content': df}})
+
 
     # POST: ticker, order_id, trade_env, action, quantity, price
+    @web_expt()
     async def modify_order(self, request):
-        try:
-            order_id = request.form.get('order_id')
-            assert order_id is not None, 'order_id cannot be empty'
+        order_id = request.form.get('order_id')
+        assert order_id is not None, 'order_id cannot be empty'
 
-            action = str(request.form.get('action')).upper()
-            assert action in ('NORMAL', 'CANCEL', 'DISABLE', 'ENABLE', 'DELETE'), f"Invalid action '{action}'"
+        action = str(request.form.get('action')).upper()
+        assert action in ('NORMAL', 'CANCEL', 'DISABLE', 'ENABLE', 'DELETE'), f"Invalid action '{action}'"
 
-            trade_environment = str(request.form.get('trade_environment')).upper()
-            assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
+        trade_environment = str(request.form.get('trade_environment')).upper()
+        assert trade_environment in ('REAL', 'SIMULATE',), f"Invalid trade environment '{trade_environment}'"
 
-            ticker = request.form.get('ticker')
-            market = ticker.split('.')[0]
+        ticker = request.form.get('ticker')
+        market = ticker.split('.')[0]
 
-            if action == 'NORMAL':
-                quantity = request.form.get('quantity')
-                assert quantity is not None, 'quantity cannot be empty'
-                quantity = float(quantity)
+        if action == 'NORMAL':
+            quantity = request.form.get('quantity')
+            assert quantity is not None, 'quantity cannot be empty'
+            quantity = float(quantity)
 
-                price = request.form.get('price')
-                assert price is not None, 'price cannot be empty'
-                price = float(price)
+            price = request.form.get('price')
+            assert price is not None, 'price cannot be empty'
+            price = float(price)
 
-                adjust_limit = request.form.get('adjust_limit')
-                adjust_limit = 0.0 if adjust_limit is None else float(adjust_limit)
+            adjust_limit = request.form.get('adjust_limit')
+            adjust_limit = 0.0 if adjust_limit is None else float(adjust_limit)
 
-            else:
-                quantity = 0.0
-                price = 0.0
-                adjust_limit = 0.0
+        else:
+            quantity = 0.0
+            price = 0.0
+            adjust_limit = 0.0
 
-            ret_code, df = self.trade_contexts[market].modify_order(order_id=order_id,
-                                                                    modify_order_op=action,
-                                                                    price=price, qty=abs(quantity),
-                                                                    trd_env=trade_environment,
-                                                                    adjust_limit=adjust_limit)
+        ret_code, df = self.trade_contexts[market].modify_order(order_id=order_id,
+                                                                modify_order_op=action,
+                                                                price=price, qty=abs(quantity),
+                                                                trd_env=trade_environment,
+                                                                adjust_limit=adjust_limit)
 
-            if ret_code == RET_OK:
-                return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
-            else:
-                return response.json({'ret_code': 0, 'return': {'content': df}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        if ret_code == RET_OK:
+            return response.json({'ret_code': 1, 'return': {'content': df.to_json(), 'order_id': order_id}})
+        else:
+            raise Exception(df)
 
     # POST: ticker, order_id, trade_env
     async def cancel_order(self, request):
@@ -548,52 +527,49 @@ class FutuHook():
         return status
 
     # POST: tickers, datatypes, start_date
+    @web_expt()
     async def db_fill_data(self, request):
-        try:
-            ticker = request.form.get('tickers').upper()
-            assert ticker is not None, "ticker cannot be empty"
-            if ('[' in ticker) and (']' in ticker):
-                ticker = eval(ticker)
-            else:
-                ticker = [ticker]
-            datatype = request.form.get('datatypes').upper()
-            assert datatype in supported_dtypes, f"Invalid data type {datatype}"
-            if ('[' in datatype) and (']' in datatype):
-                datatype = eval(datatype)
-            else:
-                datatype = [datatype]
-            start_date = request.form.get('start_date')
-            end_date = request.form.get('end_date')
+        ticker = request.form.get('tickers').upper()
+        assert ticker is not None, "ticker cannot be empty"
+        if ('[' in ticker) and (']' in ticker):
+            ticker = eval(ticker)
+        else:
+            ticker = [ticker]
+        datatype = request.form.get('datatypes').upper()
+        assert datatype in supported_dtypes, f"Invalid data type {datatype}"
+        if ('[' in datatype) and (']' in datatype):
+            datatype = eval(datatype)
+        else:
+            datatype = [datatype]
+        start_date = request.form.get('start_date')
+        end_date = request.form.get('end_date')
 
-            result_status = await self.fill_db(tickers=ticker, datatypes=datatype, start_date=start_date,end_date=end_date)
+        result_status = await self.fill_db(tickers=ticker, datatypes=datatype, start_date=start_date,end_date=end_date)
 
-            if len(result_status['Success']) > 0:
-                return response.json({'ret_code': 1, 'return': {'content': result_status}})
-            else:
-                return response.json({'ret_code': 0, 'return': {'content': result_status}})
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
+        if len(result_status['Success']) > 0:
+            return response.json({'ret_code': 1, 'return': {'content': result_status}})
+        else:
+            return response.json({'ret_code': 0, 'return': {'content': result_status}})
+
 
     # GET: tickers
+    @web_expt()
     async def get_lot_size(self, request):
-        try:
-            tickers = request.args.get('tickers')
-            assert tickers is not None, 'tickers cannot be empty'
-            if ('[' in tickers) and (']' in tickers):
-                tickers = eval(tickers)
-            if isinstance(tickers, str):
-                tickers = [tickers]
-            # same market type
-            ret_code, data = self.quote_context.get_stock_basicinfo(market=tickers[0].upper().split('.')[0],
-                                                                    code_list=tickers)
-            if ret_code == 0:
-                df = data[['code', 'lot_size']].rename(columns={'code': 'tickers'}).set_index('tickers', drop=True)
-                return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
-            else:
-                raise Exception(data)
+        tickers = request.args.get('tickers')
+        assert tickers is not None, 'tickers cannot be empty'
+        if ('[' in tickers) and (']' in tickers):
+            tickers = eval(tickers)
+        if isinstance(tickers, str):
+            tickers = [tickers]
+        # same market type
+        ret_code, data = self.quote_context.get_stock_basicinfo(market=tickers[0].upper().split('.')[0],
+                                                                code_list=tickers)
+        if ret_code == 0:
+            df = data[['code', 'lot_size']].rename(columns={'code': 'tickers'}).set_index('tickers', drop=True)
+            return response.json({'ret_code': 1, 'return': {'content': df.to_json()}})
+        else:
+            raise Exception(data)
 
-        except Exception as e:
-            return response.json({'ret_code': 0, 'return': {'content': str(e)}})
 
     def app_add_route(self, app):
         app.add_route(self.get_subscriptions, '/subscriptions', methods=['GET'])
