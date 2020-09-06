@@ -1,4 +1,4 @@
-from FutuAlgo.algo import CandlestickStrategy
+from FutuAlgo.advanced.strategy_types import CandlestickStrategy
 import datetime
 import pandas as pd
 

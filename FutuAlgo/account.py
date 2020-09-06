@@ -120,9 +120,6 @@ class Account:
     def get_current_qty(self, ticker):
         return self._positions.loc[ticker]['quantity']
 
-    def get_current_market_value(self, ticker):
-        return self._positions.loc[ticker]['market_value']
-
     def get_latest_price(self, ticker):
         return self._positions.loc[ticker]['price']
 
@@ -136,11 +133,15 @@ class Account:
             return 0
 
     @property
-    def cash(self):
-        return self._current_cash
+    def pv(self):
+        return self.mv + self.cash
 
     @property
-    def current_cash(self):
+    def mv(self):
+        return sum(self._positions['market_value'])
+
+    @property
+    def cash(self):
         return self._current_cash
 
     @property
@@ -150,10 +151,6 @@ class Account:
     @property
     def pending_orders(self):
         return self._pending_orders.copy()
-
-    @property
-    def mv(self):
-        return sum(self._positions['market_value'])
 
     @property
     def n_trades(self):

@@ -1,4 +1,4 @@
-from FutuAlgo.algo import Backtest
+from FutuAlgo.advanced.utilities import Backtest
 import os
 os.environ['PYTHONASYNCIODEBUG'] = '1'
 
