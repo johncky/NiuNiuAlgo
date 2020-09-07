@@ -1,3 +1,5 @@
+import pandas as pd
+
 class Execution:
     def __init__(self, account, data, trading_environment, logger):
         self._account = account
