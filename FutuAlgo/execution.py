@@ -6,7 +6,9 @@ class Execution:
         self._trading_environment = trading_environment
 
     def trade(self, ticker, trade_side, order_type, quantity, price):
-        risk_passed, msg = self._account.pre_trade_check(ticker=ticker, quantity=quantity, trade_side=trade_side, price=price)
+        lot_size = self._data.get_lot_size(ticker=ticker)
+        risk_passed, msg = self._account.pre_trade_check(ticker=ticker, quantity=quantity, trade_side=trade_side,
+                                                         price=price, lot_size=lot_size)
         if not risk_passed:
             msg = f'Risk check failed:"{order_type} {quantity} qty of {ticker} @ {price}" due to {msg}'
             self._logger.info(msg)

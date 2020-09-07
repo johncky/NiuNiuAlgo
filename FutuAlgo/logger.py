@@ -24,24 +24,24 @@ class RootLogger:
     def set_root(self, level):
         self.root.setLevel(level=level)
         # log everything
-        base_handler = logging.FileHandler('{}{}'.format(self.file_path,'ROOT.log'))
+        base_handler = logging.FileHandler('{}{}'.format(self.file_path, 'ROOT.log'))
         base_handler.setFormatter(self.baseformatter)
         base_handler.setLevel(logging.DEBUG)
 
         # log only DEBUG
-        debug_handler = logging.FileHandler('{}{}'.format(self.file_path,'DEBUG.log'))
+        debug_handler = logging.FileHandler('{}{}'.format(self.file_path, 'DEBUG.log'))
         debug_handler.setFormatter(self.baseformatter)
         debug_handler.setLevel(logging.DEBUG)
         debug_handler.addFilter(LevelFilter(logging.DEBUG))
 
         # log only INFO
-        info_handler = logging.FileHandler('{}{}'.format(self.file_path,'INFO.log'))
+        info_handler = logging.FileHandler('{}{}'.format(self.file_path, 'INFO.log'))
         info_handler.setFormatter(self.baseformatter)
         info_handler.setLevel(logging.INFO)
         info_handler.addFilter(LevelFilter(logging.INFO))
 
         # log only ERROR
-        error_handler = logging.FileHandler('{}{}'.format(self.file_path,'ERROR.log'))
+        error_handler = logging.FileHandler('{}{}'.format(self.file_path, 'ERROR.log'))
         error_handler.setFormatter(self.baseformatter)
         error_handler.setLevel(logging.WARNING)
         error_handler.addFilter(LevelFilter(logging.WARNING))
@@ -61,7 +61,7 @@ class RootLogger:
         logger = self.root.getChild('{}'.format(logger_name))
         logger.setLevel(level)
         if build_file_handler:
-            file_handler = logging.FileHandler('{}{}'.format(self.file_path,'{}.log'.format(logger_name)))
+            file_handler = logging.FileHandler('{}{}'.format(self.file_path, '{}.log'.format(logger_name)))
             file_handler.setFormatter(self.baseformatter)
             file_handler.setLevel(level)
             logger.addHandler(file_handler)

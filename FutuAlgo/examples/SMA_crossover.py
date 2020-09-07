@@ -24,13 +24,13 @@ class SMACrossover(CandlestickStrategy):
             sma_long_cur = df['SMA_long'].iloc[-1]
 
             if (sma_short_last <= sma_long_last) and (sma_short_cur > sma_long_cur) and (self.get_current_qty(ticker) == 0):
-                df.to_csv(f'Trade_Recon/BUY_{ticker.split()[1]}_{df["datetime"].iloc[-1]}.csv')
+                df.to_csv(f'Trade_Recon/BUY_{self.n_trades}.csv')
                 self.buy_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                price=self.get_latest_price(ticker=ticker) + 1)
 
 
             elif (sma_short_last >= sma_long_last) and (sma_short_cur < sma_long_cur) and (self.get_current_qty(ticker) > 0):
-                df.to_csv(f'Trade_Recon/SELL_{ticker.split()[1]}_{df["datetime"].iloc[-1]}.csv')
+                df.to_csv(f'Trade_Recon/SELL_{self.n_trades}.csv')
                 self.sell_limit(ticker=ticker, quantity=self.get_lot_size(ticker),
                                 price=self.get_latest_price(ticker=ticker) - 1)
         else:
