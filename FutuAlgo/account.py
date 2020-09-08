@@ -35,7 +35,6 @@ class Account:
         order_id = df['order_id'].iloc[0]
         ticker = df['ticker'].iloc[0]
         order_status = df['order_status'].iloc[0]
-
         in_pending = False
         in_completed = False
         if order_id in self._pending_orders.keys():
@@ -49,7 +48,7 @@ class Account:
             qty_change = dealt_qty - last_qty
 
         else:
-            if order_id not in self._completed_orders['order_id']:
+            if order_id not in self._completed_orders['order_id'].to_list():
                 cash_change = - dealt_qty * avg_price
                 qty_change = dealt_qty
             else:
@@ -60,6 +59,7 @@ class Account:
         if order_status in ('SUBMIT_FAILED', 'FILLED_ALL', 'CANCELLED_PART', 'CANCELLED_ALL', 'FAILED', 'DELETED'):
             if not in_completed:
                 self._completed_orders = self._completed_orders.append(df)
+                # self._completed_orders = self._completed_orders.drop_duplicates(['order_id'], keep='last')
 
                 if order_status in ('FILLED_ALL', 'CANCELLED_PART'):
                     # update slippage
