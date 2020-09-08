@@ -54,6 +54,7 @@ class FutuOrderUpdateHandler(TradeOrderHandlerBase):
             # df['update_time'] = pd.to_datetime(df['update_time'])
             self.queue.put((f'FUTU.ORDER_UPDATE.{df["order_id"].iloc[0]}', df))
             # print(df['order_status'])
+            print(f'{df["order_status"]}')
         return ret, df
 
 
@@ -67,9 +68,13 @@ class FutuHook():
         self.quote_context = OpenQuoteContext(host=FUTU_HOST, port=FUTU_PORT)
 
         self.trade_contexts = dict()
-        for mkt in ('HK', 'US', 'CN'):
-            self.trade_contexts[mkt] = OpenHKTradeContext(host=FUTU_HOST, port=FUTU_PORT)
-            self.trade_contexts[mkt].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        self.trade_contexts = dict()
+        self.trade_contexts['HK'] = OpenHKTradeContext(host=FUTU_HOST, port=FUTU_PORT)
+        self.trade_contexts['US'] = OpenUSTradeContext(host=FUTU_HOST, port=FUTU_PORT)
+        self.trade_contexts['CN'] = OpenCNTradeContext(host=FUTU_HOST, port=FUTU_PORT)
+        self.trade_contexts['HK'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        self.trade_contexts['US'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
+        self.trade_contexts['CN'].set_handler(FutuOrderUpdateHandler(queue=self.queue))
 
         self.quote_context.set_handler(FutuQuoteHandler(queue=self.queue))
         self.quote_context.set_handler(FutuKlineHandler(queue=self.queue))
@@ -586,7 +591,7 @@ class FutuHook():
 
 if __name__ == '__main__':
     # Start FutuHook
-    INIT_DATATYPE = ['K_3M']
+    INIT_DATATYPE = ['K_1M']
     INIT_TICKERS = ['HK.00700', 'HK.09988', 'HK.09999', 'HK.02318', 'HK.02800', 'HK.01211']
     futu_hook = FutuHook()
     futu_hook.subscribe(datatypes=INIT_DATATYPE, tickers=INIT_TICKERS)
