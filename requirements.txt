@@ -16,7 +16,7 @@ httptools==0.1.1
 httpx==0.11.1
 hyperframe==5.2.0
 idna==2.10
-Jinja2==2.11.2
+Jinja2==2.11.3
 MarkupSafe==1.1.1
 multidict==4.7.6
 numpy==1.19.1
