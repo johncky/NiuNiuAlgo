@@ -35,6 +35,6 @@ simplejson==3.17.2
 six==1.15.0
 sniffio==1.1.0
 typing-extensions==3.7.4.2
-urllib3==1.25.10
+urllib3==1.26.5
 websockets==8.1
 yarl==1.5.1
