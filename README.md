@@ -1,27 +1,26 @@
 # FutuHook
-Algorithmic trading system for algo trading on FutuNiuNiu broker (project is not finished)</p>
-<a href="https://github.com/johncky/FutuAlgo/blob/master/docs/System.png">How it works</a>
+algo trading on FutuNiuNiu broker </p>
 
 ## FutuHook
-1. Maintain Connection to Futu OpenD, stream and broadcast real-time data 
-2. Store streamed data to MySQL databases</li>
-3. API for changing subscribed tickers & data types, get historical data and more</li>
-4. API for placing orders, modifying orders, cancelling orders</li>
+1. Maintain Connection to Futu OpenD, broadcast data thorugh ZMQ
+2. Save data to MySQL db</li>
+3. Data downloads, subscription changes</li>
+4. Place, modify, cancel orders</li>
 
 ### How to run?
 1. Install and run FutuOpenD: <a href='https://www.futunn.com/download/openAPI?lang=en-US'>https://www.futunn.com/download/openAPI?lang=en-US</a></li>
 2. Install and run MySQL database: <a href='https://www.mysql.com/downloads/'>https://www.mysql.com/downloads/</a></li>
-3. Set Up system environment variables for the following:
+3. Set environment variables:
   - SANIC_HOST : host for sanic app (e.g. 0.0.0.0)</li>
   - SANIC_PORT: port for sanic app (e.g. 8000)</li>
-  - FUTU_TRADE_PWD: the trade unlock password for your Futu account</li>
-  - FUTU_HOST: host of your running Futu OpenD</li>
-  - FUTU_PORT: port of your running Futu OpenD</li>
+  - FUTU_TRADE_PWD: trade unlock password for Futu </li>
+  - FUTU_HOST: host for Futu OpenD</li>
+  - FUTU_PORT: port for Futu OpenD</li>
   - ZMQ_PORT: port for ZMQ</li>
-  - MYSQL_DB: name of the database that you wish to store your data</li>
-  - MYSQL_HOST: host of your running MySQL service</li>
-  - MYSQL_USER: user of your running MySQL service</li>
-  - MYSQL_PWD: password of your user</li>
+  - MYSQL_DB: name of the db</li>
+  - MYSQL_HOST: host for MySQL</li>
+  - MYSQL_USER: user for MySQL</li>
+  - MYSQL_PWD: password for MySQLr</li>
 
 ```python
     import FutuAlgo
@@ -35,10 +34,9 @@ Algorithmic trading system for algo trading on FutuNiuNiu broker (project is not
 
 ## Algo
 Functions: 
-1. Subscribe to FutuHook and receive price updates
-2. Trigger events on receiving different data types
-4. Place orders, modify orders, cancel orders
-5. APIs for retrieving strategy infos(returns, params, positions, pending orders ...)
+1. Listen to FutuHook and receive price updates
+2. Trigger events on receiving data 
+5. Retrieving strategy infos through Sanic(returns, positions, pending orders etc)
 
 ### Example: SMA Crossover
 
@@ -86,7 +84,6 @@ class SMACrossover(FutuAlgo.CandlestickStrategy):
 ```
 
 ### Run an Algo
-
 ```python
     algo = SMACrossover(short=10, long=20)
     algo.initialize(initial_capital=100000.0, margin=100000.0, mq_ip='tcp://127.0.0.1:8001',
@@ -96,62 +93,7 @@ class SMACrossover(FutuAlgo.CandlestickStrategy):
     algo.run(5000)
 ```
 
-## Backtesting - research stage quick back-test</h3>
-Quick back-test module for research purpose: [QuickBacktest](http://www.github.com/johncky/QuickBacktest)
-
-```python
-    import QuickBacktest
-
-    class SMA(QuickBacktest.Strategy):
-        def init(self):
-            self.data['sma16'] = self.data['adjclose'].rolling(16).mean()
-            self.data['sma32'] = self.data['adjclose'].rolling(32).mean()
-            self.data['dif'] = self.data['sma16'] - self.data['sma32']
-            self.data['pre_dif'] = self.data['dif'].shift(1)
-
-        def signal(self):
-            if self.dif > 0 and self.pre_dif <= 0:
-                self.long()
-
-            elif self.dif < 0 and self.pre_dif >= 0:
-                self.exit_long()
-            else:
-                pass
-
-    tickers = ('FB', 'AMZN', 'AAPL', 'GOOG', 'NFLX', 'MDB', 'NET', 'TEAM', 'CRM')
-    sma = SMA()
-    result = sma.backtest(tickers=tickers,
-                           capital=1000000,
-                           start_date="2015-01-01",
-                           end_date="2020-07-31",
-                           buy_at_open=True,
-                           bid_ask_spread=0.0,
-                           fee_mode='FIXED:0',
-                           data_params={'interval': '1d', 'range': '10y'})
-                      
-```
-
-### Backtesting report
-
-```python
-    result.portfolio_report(benchmark="^IXIC", allocations=[0.25,0.25,0.25,0.25])
-    result.ticker_report('FB', benchmark='^IXIC')
-```
-
-#### Plot entry and exit points</h4>
-```python
-    result.ticker_plot('FB')
-```
-
-## Backtesting - Using Algo Class
-Use Algo class to back-test Strategies. This is useful when you have strategies that uses multiple 
-data types and data source.
-
-You need to fill your MySQL database with historical data first, as it retrieve data from your MySQL
-database through FutuHook. (This is to avoid wasting download quota of your Futu account)
-
-You can do so by using FutuHook api: /db/fill.
-
+## Backtesting 
 ```python
 import FutuAlgo
 
@@ -205,28 +147,18 @@ if __name__ == '__main__':
 ```
 
 ### Backtesting report 
-Generated by <a href="https://github.com/ranaroussi/quantstats">Quantstats</a>. 
-
 ```python
     # Use tencent 0700 as benchmark. This will open a webbrowser showing the full report.
     algo.report(benchmark='0700.HK')
 ```
 
-### Plot entry and exit points
-```python
-    # Plot exit-entry point of this ticker
-    algo.plot_ticker_trades('K_DAY', 'HK.00700')
-```
-<img src="https://github.com/johncky/FutuAlgo/blob/master/docs/exit_entry_plot.png">
-
-
-## Dashboard (in development)
+## Dashboard
 Functions: 
-1. Sanic webapp that retrieves strategies' performances and positions
-2. Render and serve dashboard webpages 
-3. Pause, Resume, Tune your Algos
+1. Retrieves strategies' performances and positions
+2. Serve dashboard webpages 
+3. Pause, Resume, Tune Algos
 
-### How to Run?
+### Run
 ```python
     import FutuAlgo
     
@@ -237,6 +169,3 @@ Functions:
 
 ### Interface
 <img src="https://github.com/johncky/FutuAlgo/blob/master/docs/interface.png">
-
-## Notes
-1. Cash is deducted after order is filled. If you place a new order before previous one is filled, you might end up with negative cash balance.</li>
