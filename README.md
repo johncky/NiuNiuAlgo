@@ -1,6 +1,24 @@
 # FutuHook
 algo trading on FutuNiuNiu broker </p>
 
+### Dashboard Interface
+<img src="https://github.com/johncky/FutuAlgo/blob/master/docs/interface.png">
+
+## Dashboard
+Functions: 
+1. Retrieves strategies' performances and positions
+2. Serve dashboard webpages 
+3. Pause, Resume, Tune Algos
+
+### Run
+```python
+    import FutuAlgo
+    
+    if __name__ == '__main__':
+        app = FutuAlgo.WebApp()
+        app.run(port=8522, hook_ip='http://127.0.0.1:8000')
+```
+
 ## FutuHook
 1. Maintain Connection to Futu OpenD, broadcast data thorugh ZMQ
 2. Save data to MySQL db</li>
@@ -151,21 +169,3 @@ if __name__ == '__main__':
     # Use tencent 0700 as benchmark. This will open a webbrowser showing the full report.
     algo.report(benchmark='0700.HK')
 ```
-
-## Dashboard
-Functions: 
-1. Retrieves strategies' performances and positions
-2. Serve dashboard webpages 
-3. Pause, Resume, Tune Algos
-
-### Run
-```python
-    import FutuAlgo
-    
-    if __name__ == '__main__':
-        app = FutuAlgo.WebApp()
-        app.run(port=8522, hook_ip='http://127.0.0.1:8000')
-```
-
-### Interface
-<img src="https://github.com/johncky/FutuAlgo/blob/master/docs/interface.png">
